@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' file: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>Slideshow Studio</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span> Slideshow Studio
+    </div>
+    <div class="topbar-actions">
+      <button id="btnAddPhotos" class="btn primary">+ Add photos</button>
+      <span id="countLabel" class="muted"></span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- LEFT: slide list -->
+    <aside class="panel slides-panel">
+      <div class="panel-head">
+        <h2>Photos</h2>
+        <button id="btnClear" class="btn tiny ghost">Clear</button>
+      </div>
+      <ol id="slideList" class="slide-list" aria-label="Slides">
+        <li class="empty-hint">Add photos to begin.<br />Drag to reorder.</li>
+      </ol>
+    </aside>
+
+    <!-- CENTER: preview -->
+    <section class="preview-area">
+      <div class="stage" id="stage">
+        <canvas id="preview" width="1280" height="720"></canvas>
+        <div id="stageEmpty" class="stage-empty">Your slideshow preview appears here</div>
+      </div>
+      <div class="transport">
+        <button id="btnPlay" class="btn round" title="Play / pause">►</button>
+        <input id="scrub" class="scrub" type="range" min="0" max="1000" value="0" />
+        <span id="timeLabel" class="time">0:00 / 0:00</span>
+        <label class="loop-toggle"><input type="checkbox" id="loopToggle" checked /> Loop</label>
+      </div>
+    </section>
+
+    <!-- RIGHT: settings -->
+    <aside class="panel settings-panel">
+      <!-- Per-slide (shown when a slide is selected) -->
+      <section id="slideSettings" class="settings-group hidden">
+        <h2>Selected photo <span id="slideName" class="muted small"></span></h2>
+        <label class="field">
+          <span>Duration (seconds)</span>
+          <input type="number" id="sDuration" min="1" max="60" step="0.5" placeholder="default" />
+        </label>
+        <label class="field">
+          <span>Transition after (seconds)</span>
+          <input type="number" id="sTransition" min="0" max="10" step="0.1" placeholder="default" />
+        </label>
+        <label class="field">
+          <span>Motion</span>
+          <select id="sKbDirection">
+            <option value="">Use default</option>
+            <option value="off">No motion</option>
+            <option value="auto">Auto (random)</option>
+            <option value="in">Zoom in</option>
+            <option value="out">Zoom out</option>
+            <option value="left">Pan left</option>
+            <option value="right">Pan right</option>
+            <option value="up">Pan up</option>
+            <option value="down">Pan down</option>
+          </select>
+        </label>
+        <button id="btnRemoveSlide" class="btn ghost danger full">Remove this photo</button>
+        <hr />
+      </section>
+
+      <!-- Canvas -->
+      <section class="settings-group">
+        <h2>Canvas</h2>
+        <label class="field">
+          <span>Size</span>
+          <select id="canvasPreset">
+            <option value="1920x1080">1920 × 1080 (Full HD 16:9)</option>
+            <option value="1280x720" selected>1280 × 720 (HD 16:9)</option>
+            <option value="3840x2160">3840 × 2160 (4K 16:9)</option>
+            <option value="2560x1080">2560 × 1080 (Ultrawide 21:9)</option>
+            <option value="1080x1080">1080 × 1080 (Square)</option>
+            <option value="custom">Custom…</option>
+          </select>
+        </label>
+        <div id="customSize" class="field-row hidden">
+          <input type="number" id="canvasW" min="16" step="2" value="1280" />
+          <span class="times">×</span>
+          <input type="number" id="canvasH" min="16" step="2" value="720" />
+        </div>
+        <label class="field">
+          <span>Frame rate</span>
+          <select id="fps">
+            <option value="24">24 fps (film)</option>
+            <option value="25">25 fps (PAL)</option>
+            <option value="30" selected>30 fps</option>
+            <option value="50">50 fps (PAL, smooth)</option>
+            <option value="60">60 fps (smoothest)</option>
+          </select>
+        </label>
+      </section>
+
+      <!-- Timing defaults -->
+      <section class="settings-group">
+        <h2>Defaults</h2>
+        <label class="field">
+          <span>Seconds per photo <b id="durVal">7.0</b></span>
+          <input type="range" id="defDuration" min="2" max="20" step="0.5" value="7" />
+        </label>
+        <label class="field">
+          <span>Crossfade <b id="transVal">1.0</b>s</span>
+          <input type="range" id="defTransition" min="0" max="4" step="0.1" value="1" />
+        </label>
+        <label class="field">
+          <span>Motion amount <b id="kbVal">12</b>%</span>
+          <input type="range" id="defKbZoom" min="0" max="40" step="1" value="12" />
+        </label>
+        <label class="field">
+          <span>Default motion</span>
+          <select id="defKbDirection">
+            <option value="auto" selected>Auto (varied)</option>
+            <option value="off">No motion</option>
+            <option value="in">Zoom in</option>
+            <option value="out">Zoom out</option>
+          </select>
+        </label>
+      </section>
+
+      <!-- Background -->
+      <section class="settings-group">
+        <h2>Background fill</h2>
+        <p class="hint">Fills the space around photos that don't match the canvas shape.</p>
+        <label class="field">
+          <span>Style</span>
+          <select id="bgMode">
+            <option value="slide-blur" selected>Blurred copy of each photo</option>
+            <option value="montage">Blurred montage of all photos</option>
+            <option value="color">Solid colour</option>
+          </select>
+        </label>
+        <label class="field" id="bgBlurField">
+          <span>Blur <b id="blurVal">28</b></span>
+          <input type="range" id="bgBlur" min="4" max="80" step="1" value="28" />
+        </label>
+        <label class="field" id="bgDimField">
+          <span>Dim <b id="dimVal">50</b>%</span>
+          <input type="range" id="bgDim" min="0" max="90" step="1" value="50" />
+        </label>
+        <label class="field hidden" id="bgColorField">
+          <span>Colour</span>
+          <input type="color" id="bgColor" value="#101014" />
+        </label>
+      </section>
+
+      <!-- Export -->
+      <section class="settings-group export-group">
+        <h2>Export</h2>
+        <label class="field">
+          <span>Format</span>
+          <select id="exportFormat">
+            <option value="mp4" selected>MP4 · H.264 (most compatible)</option>
+            <option value="webm">WebM · VP9 (royalty-free)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Quality</span>
+          <select id="exportQuality">
+            <option value="high">High (larger file)</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="small">Smaller file</option>
+          </select>
+        </label>
+        <button id="btnExport" class="btn primary full">Export video…</button>
+        <div id="exportProgress" class="progress hidden">
+          <div class="bar"><div id="progressFill" class="bar-fill"></div></div>
+          <div class="progress-row">
+            <span id="progressLabel" class="muted small">Preparing…</span>
+            <button id="btnCancelExport" class="btn tiny ghost">Cancel</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
