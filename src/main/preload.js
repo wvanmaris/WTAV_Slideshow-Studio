@@ -8,4 +8,12 @@ contextBridge.exposeInMainWorld('api', {
   exportFrame: (id, buffer) => ipcRenderer.invoke('export:frame', { id, buffer }),
   exportEnd: (id) => ipcRenderer.invoke('export:end', { id }),
   exportCancel: (id) => ipcRenderer.invoke('export:cancel', { id }),
+
+  // Project save / load
+  saveProjectPath: (defaultName) => ipcRenderer.invoke('dialog:saveProjectPath', { defaultName }),
+  openProjectPath: () => ipcRenderer.invoke('dialog:openProjectPath'),
+  openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
+  writeProject: (args) => ipcRenderer.invoke('project:write', args),
+  readProject: (filePath) => ipcRenderer.invoke('project:read', { filePath }),
+  matchInFolder: (folder, names) => ipcRenderer.invoke('fs:matchInFolder', { folder, names }),
 });

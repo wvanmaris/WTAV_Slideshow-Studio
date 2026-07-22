@@ -12,6 +12,7 @@ export class Player {
     this._raf = null;
     this._last = 0;
     this._scratch = null;
+    this.overlay = null;            // optional (ctx, t) => void, drawn on top
   }
 
   _ensureScratch(w, h) {
@@ -40,6 +41,7 @@ export class Player {
     }
     const scratch = this._ensureScratch(project.canvas.w, project.canvas.h);
     renderFrame(this.ctx, project, timeline, assets, t, scratch);
+    if (this.overlay) this.overlay(this.ctx, t);
   }
 
   seek(t) {

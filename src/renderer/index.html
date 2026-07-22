@@ -3,14 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; img-src 'self' file: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+        content="default-src 'self'; img-src 'self' file: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' file: blob: data:; worker-src 'self' blob:;" />
   <title>Slideshow Studio</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
-      <span class="dot"></span> Slideshow Studio
+    <div class="topbar-left">
+      <div class="brand"><span class="dot"></span> Slideshow Studio</div>
+      <button id="btnOpenProject" class="btn tiny ghost">Open…</button>
+      <button id="btnSaveProject" class="btn tiny ghost">Save…</button>
+      <span id="projectName" class="muted small"></span>
     </div>
     <div class="topbar-actions">
       <button id="btnAddPhotos" class="btn primary">+ Add photos</button>
@@ -71,6 +74,21 @@
             <option value="down">Pan down</option>
           </select>
         </label>
+
+        <div class="face-inspect">
+          <div class="face-preview-wrap">
+            <canvas id="facePreview" class="face-preview"></canvas>
+          </div>
+          <div class="face-row">
+            <span id="faceCount" class="muted small">—</span>
+            <button id="btnRedetect" class="btn tiny ghost">Re-scan</button>
+          </div>
+          <label class="check-field">
+            <input type="checkbox" id="sProtect" checked />
+            <span>Keep faces in frame on this photo</span>
+          </label>
+        </div>
+
         <button id="btnRemoveSlide" class="btn ghost danger full">Remove this photo</button>
         <hr />
       </section>
@@ -106,6 +124,34 @@
         </label>
       </section>
 
+      <!-- Photo frame (foreground) -->
+      <section class="settings-group">
+        <h2>Photo frame</h2>
+        <p class="hint">How large the sharp photo sits on the canvas. On a wide canvas, keep it ~16:9 so the background shows and faces stay framed.</p>
+        <label class="field">
+          <span>Shape</span>
+          <select id="fgShape">
+            <option value="16:9" selected>16:9 (recommended)</option>
+            <option value="4:3">4:3</option>
+            <option value="3:2">3:2</option>
+            <option value="1:1">Square</option>
+            <option value="fill">Fill whole canvas</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Size <b id="fgScaleVal">100</b>%</span>
+          <input type="range" id="fgScale" min="40" max="100" step="1" value="100" />
+        </label>
+        <label class="field">
+          <span>Position</span>
+          <select id="fgAlign">
+            <option value="center" selected>Center</option>
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+          </select>
+        </label>
+      </section>
+
       <!-- Timing defaults -->
       <section class="settings-group">
         <h2>Defaults</h2>
@@ -130,6 +176,21 @@
             <option value="out">Zoom out</option>
           </select>
         </label>
+      </section>
+
+      <!-- Face protection (AI) -->
+      <section class="settings-group">
+        <h2>Faces (AI)</h2>
+        <p class="hint">Runs 100% on this computer — no photo ever leaves the machine.</p>
+        <label class="check-field">
+          <input type="checkbox" id="protectFaces" checked />
+          <span>Keep faces in frame (auto-reframe)</span>
+        </label>
+        <label class="check-field">
+          <input type="checkbox" id="showFaceOverlay" />
+          <span>Show detected faces in preview</span>
+        </label>
+        <div id="faceScanStatus" class="hint" style="margin-bottom:0;"></div>
       </section>
 
       <!-- Background -->
@@ -190,6 +251,39 @@
 
   <div id="toast" class="toast hidden"></div>
 
+  <!-- Save options modal -->
+  <div id="saveModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Save project</h3>
+      <label class="check-field">
+        <input type="checkbox" id="collectFiles" checked />
+        <span>Copy all photos into a folder next to the project <b>(recommended)</b>
+          <span class="muted small block">Creates “&lt;name&gt; files”. Makes the project portable — move or share it and the photos come along.</span>
+        </span>
+      </label>
+      <div class="modal-actions">
+        <button id="btnCancelSave" class="btn ghost">Cancel</button>
+        <button id="btnConfirmSave" class="btn primary">Choose location &amp; save…</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Relink missing photos modal -->
+  <div id="relinkModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Some photos weren’t found</h3>
+      <p class="muted small" id="relinkMsg"></p>
+      <ul id="relinkList" class="relink-list"></ul>
+      <div class="modal-actions">
+        <button id="btnRelinkSkip" class="btn ghost">Continue without them</button>
+        <button id="btnRelinkLocate" class="btn primary">Locate folder…</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- face-api.js (bundles its own TensorFlow.js). Classic script exposes the
+       global window.faceapi; runs before the app module. Fully offline. -->
+  <script src="vendor/face-api.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,9 +1,10 @@
 // app.js — UI state and wiring. Holds the project model, prepares assets,
 // drives the preview Player, and runs exports.
-import { buildTimeline } from './render.js';
+import { buildTimeline, featuredAt, getSourceRect, computeFrame } from './render.js';
 import { loadImage, makeSlideBackground, makeMontage } from './assets.js';
 import { Player } from './preview.js';
 import { exportVideo } from './exporter.js';
+import { detectFaces, faceApiAvailable } from './faces.js';
 
 // --- State -----------------------------------------------------------------
 let uidCounter = 1;
@@ -13,6 +14,9 @@ const project = {
   canvas: { w: 1280, h: 720 },
   fps: 30,
   loop: true,
+  protectFaces: true,     // AI: keep detected faces in frame
+  showFaceOverlay: false, // draw face boxes on the preview
+  foreground: { shape: '16:9', scale: 1, align: 'center' }, // the photo frame
   background: { mode: 'slide-blur', blur: 28, dim: 0.5, color: '#101014' },
   defaults: {
     durationSec: 7,
@@ -26,6 +30,9 @@ const project = {
 const assetMap = new Map(); // slide.id -> { img, bg }
 let timeline = buildTimeline(project);
 let selectedId = null;
+let currentPlayingId = null; // slide currently shown in the preview (≠ selected)
+let currentProjectPath = null;
+let currentProjectName = null;
 let exporting = false;
 let cancelRequested = false;
 
@@ -56,7 +63,27 @@ function rebuild() {
   updateCount();
 }
 
-const player = new Player(canvasEl, getState, (t, dur) => updateTimeUI(t, dur));
+const player = new Player(canvasEl, getState, (t, dur) => { updateTimeUI(t, dur); updateNowPlaying(t); });
+
+// Mark the photo currently shown in the preview in the list (independent of
+// selection). Only touches DOM when the featured slide changes, so it's cheap
+// even at 60 fps.
+function updateNowPlaying(t) {
+  const f = (timeline && timeline.items.length) ? featuredAt(timeline, t) : null;
+  setNowPlaying(f ? project.slides[f.item.index].id : null);
+}
+function setNowPlaying(id) {
+  if (id === currentPlayingId) return;
+  currentPlayingId = id;
+  document.querySelectorAll('.slide-item.now-playing').forEach((el) => el.classList.remove('now-playing'));
+  if (id) {
+    const el = document.querySelector(`.slide-item[data-id="${id}"]`);
+    if (el) {
+      el.classList.add('now-playing');
+      if (player.playing) el.scrollIntoView({ block: 'nearest' });
+    }
+  }
+}
 
 // --- Toast -----------------------------------------------------------------
 let toastTimer = null;
@@ -78,7 +105,7 @@ async function addSources(sources) {
       const img = await loadImage(src);
       const id = uid();
       const name = src.split(/[\\/]/).pop();
-      const slide = { id, src, name };
+      const slide = { id, src, name, faces: [], protect: true };
       assetMap.set(id, { img, bg: makeSlideBackground(img, project) });
       project.slides.push(slide);
       added.push(slide);
@@ -92,6 +119,40 @@ async function addSources(sources) {
   rebuild();
   if (added.length && !selectedId) selectSlide(added[0].id);
   $('stageEmpty').classList.toggle('hidden', project.slides.length > 0);
+
+  // Detect faces on the newly added photos (on-device, in the background).
+  scanFaces(added);
+}
+
+let scanning = false;
+async function scanFaces(slides) {
+  if (!faceApiAvailable()) {
+    $('faceScanStatus').textContent = 'Face AI unavailable — motion will use defaults.';
+    return;
+  }
+  const todo = slides.filter((s) => s && assetMap.has(s.id));
+  if (!todo.length) return;
+  scanning = true;
+  const status = $('faceScanStatus');
+  let done = 0;
+  for (const slide of todo) {
+    const asset = assetMap.get(slide.id);
+    if (!asset) { done++; continue; }
+    status.textContent = `Scanning for faces… ${done + 1}/${todo.length}`;
+    try {
+      slide.faces = await detectFaces(asset.img);
+    } catch (err) {
+      console.error('face detect failed', err);
+      slide.faces = [];
+    }
+    done++;
+    rebuild();                       // reframe as results arrive
+    if (slide.id === selectedId) refreshSelectedFacePanel();
+    refreshSlideList();
+  }
+  const total = todo.reduce((n, s) => n + (s.faces ? s.faces.length : 0), 0);
+  status.textContent = `Found ${total} face${total === 1 ? '' : 's'} across ${todo.length} photo${todo.length === 1 ? '' : 's'}.`;
+  scanning = false;
 }
 
 function rebuildMontage() {
@@ -141,16 +202,23 @@ function refreshSlideList() {
   }
   project.slides.forEach((s, i) => {
     const li = document.createElement('li');
-    li.className = 'slide-item' + (s.id === selectedId ? ' selected' : '');
+    li.className = 'slide-item'
+      + (s.id === selectedId ? ' selected' : '')
+      + (s.id === currentPlayingId ? ' now-playing' : '')
+      + (s.missing ? ' missing' : '');
     li.draggable = true;
     li.dataset.id = s.id;
     const dur = s.durationSec ?? project.defaults.durationSec;
+    const sub = s.missing
+      ? '<span class="warn">⚠ missing</span>'
+      : `${dur}s${s.kenBurns && s.kenBurns.enabled === false ? ' · no motion' : ''}`;
     li.innerHTML = `
+      <span class="playmark" title="Now showing"></span>
       <span class="num">${i + 1}</span>
       <img class="thumb" src="${srcToUrl(s.src)}" alt="" />
       <div class="meta">
         <div class="name">${s.name || 'photo'}</div>
-        <div class="sub">${dur}s${s.kenBurns && s.kenBurns.enabled === false ? ' · no motion' : ''}</div>
+        <div class="sub">${sub}</div>
       </div>`;
     li.addEventListener('click', () => selectSlide(s.id));
     li.addEventListener('dragstart', (e) => { dragId = s.id; li.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
@@ -199,7 +267,33 @@ function selectSlide(id) {
   $('sKbDirection').value = s.kenBurns
     ? (s.kenBurns.enabled === false ? 'off' : (s.kenBurns.direction || 'auto'))
     : '';
+  $('sProtect').checked = s.protect !== false;
+  refreshSelectedFacePanel();
   refreshSlideList();
+}
+
+// Draw the selected photo with its detected face boxes in the side panel.
+function refreshSelectedFacePanel() {
+  const s = project.slides.find((x) => x.id === selectedId);
+  const cv = $('facePreview');
+  if (!s || !cv) return;
+  const asset = assetMap.get(s.id);
+  if (!asset || !asset.img) return;
+  const img = asset.img;
+  const maxW = 260, scale = Math.min(1, maxW / img.width);
+  cv.width = Math.round(img.width * scale);
+  cv.height = Math.round(img.height * scale);
+  const ctx = cv.getContext('2d');
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  const faces = s.faces || [];
+  ctx.strokeStyle = 'rgba(108,140,255,0.95)';
+  ctx.lineWidth = Math.max(2, cv.width / 130);
+  for (const f of faces) {
+    ctx.strokeRect(f.x * cv.width, f.y * cv.height, f.w * cv.width, f.h * cv.height);
+  }
+  $('faceCount').textContent = scanning ? 'Scanning…'
+    : faces.length ? `${faces.length} face${faces.length === 1 ? '' : 's'} found`
+    : 'No faces found';
 }
 
 function currentSlide() { return project.slides.find((x) => x.id === selectedId); }
@@ -222,7 +316,20 @@ $('sKbDirection').addEventListener('change', (e) => {
   else s.kenBurns = { enabled: true, direction: v };
   rebuild(); refreshSlideList();
 });
+$('sProtect').addEventListener('change', (e) => {
+  const s = currentSlide(); if (!s) return;
+  s.protect = e.target.checked;
+  rebuild(); refreshSlideList();
+});
+$('btnRedetect').addEventListener('click', async () => {
+  const s = currentSlide(); if (!s || scanning) return;
+  await scanFaces([s]);
+});
 $('btnRemoveSlide').addEventListener('click', () => { if (selectedId) removeSlide(selectedId); });
+
+// Global AI toggles
+$('protectFaces').addEventListener('change', (e) => { project.protectFaces = e.target.checked; rebuild(); });
+$('showFaceOverlay').addEventListener('change', (e) => { project.showFaceOverlay = e.target.checked; player.redraw(); });
 
 // --- Global settings -------------------------------------------------------
 function applyCanvasSize(w, h) {
@@ -245,6 +352,15 @@ $('canvasW').addEventListener('change', onCustom);
 $('canvasH').addEventListener('change', onCustom);
 
 $('fps').addEventListener('change', (e) => { project.fps = parseInt(e.target.value, 10); });
+
+// Photo frame (foreground)
+$('fgShape').addEventListener('change', (e) => { project.foreground.shape = e.target.value; rebuild(); });
+$('fgScale').addEventListener('input', (e) => {
+  project.foreground.scale = parseInt(e.target.value, 10) / 100;
+  $('fgScaleVal').textContent = e.target.value;
+  rebuild();
+});
+$('fgAlign').addEventListener('change', (e) => { project.foreground.align = e.target.value; rebuild(); });
 
 $('defDuration').addEventListener('input', (e) => {
   project.defaults.durationSec = parseFloat(e.target.value);
@@ -396,14 +512,276 @@ async function runExport() {
   }
 }
 
+// --- Project save / load ---------------------------------------------------
+function basenameNoExt(p) {
+  const b = String(p).replace(/\\/g, '/').split('/').pop();
+  return b.replace(/\.[^.]+$/, '');
+}
+function setProjectPath(filePath) {
+  currentProjectPath = filePath;
+  currentProjectName = basenameNoExt(filePath);
+  $('projectName').textContent = currentProjectName ? '— ' + currentProjectName : '';
+}
+
+function serializeProject() {
+  return {
+    app: 'slideshow-studio', version: 1,
+    project: {
+      canvas: { w: project.canvas.w, h: project.canvas.h },
+      fps: project.fps, loop: project.loop,
+      protectFaces: project.protectFaces, showFaceOverlay: project.showFaceOverlay,
+      foreground: { shape: project.foreground.shape, scale: project.foreground.scale, align: project.foreground.align },
+      background: { mode: project.background.mode, blur: project.background.blur, dim: project.background.dim, color: project.background.color },
+      defaults: {
+        durationSec: project.defaults.durationSec,
+        transitionSec: project.defaults.transitionSec,
+        kenBurns: { ...project.defaults.kenBurns },
+      },
+      slides: project.slides.map((s) => ({
+        id: s.id, name: s.name, file: s.src,
+        durationSec: s.durationSec, transitionSec: s.transitionSec,
+        kenBurns: s.kenBurns, protect: s.protect, faces: s.faces || [],
+      })),
+    },
+  };
+}
+
+// A drawable stand-in for a photo that couldn't be found on disk.
+function makePlaceholder(name) {
+  const w = 1280, h = 720;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#2a2320'; ctx.fillRect(0, 0, w, h);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e0607a'; ctx.font = 'bold 48px sans-serif';
+  ctx.fillText('⚠ Photo not found', w / 2, h / 2 - 8);
+  ctx.fillStyle = '#b7998f'; ctx.font = '26px sans-serif';
+  ctx.fillText(name || '', w / 2, h / 2 + 42);
+  return c;
+}
+
+$('btnSaveProject').addEventListener('click', () => {
+  if (!project.slides.length) { toast('Add photos before saving.', true); return; }
+  $('collectFiles').checked = true;
+  $('saveModal').classList.remove('hidden');
+});
+$('btnCancelSave').addEventListener('click', () => $('saveModal').classList.add('hidden'));
+$('btnConfirmSave').addEventListener('click', async () => {
+  const collect = $('collectFiles').checked;
+  $('saveModal').classList.add('hidden');
+  const filePath = await window.api.saveProjectPath(currentProjectName || 'Untitled');
+  if (!filePath) return;
+  const doc = serializeProject();
+  const res = await window.api.writeProject({ filePath, doc, collect });
+  if (!res.ok) { toast('Save failed: ' + res.error, true); return; }
+  // When collected, repoint in-memory sources to the copied files so the
+  // session no longer depends on the originals (and re-saves are idempotent).
+  if (collect && res.dir) {
+    const dir = res.dir.replace(/\\/g, '/');
+    for (const sd of res.doc.project.slides) {
+      const isAbs = /^[a-zA-Z]:[\\/]/.test(sd.file) || sd.file.startsWith('/');
+      if (!isAbs) {
+        const slide = project.slides.find((x) => x.id === sd.id);
+        if (slide) slide.src = dir + '/' + sd.file;
+      }
+    }
+    refreshSlideList();
+  }
+  setProjectPath(filePath);
+  toast('Saved: ' + filePath);
+});
+
+$('btnOpenProject').addEventListener('click', openProject);
+async function openProject() {
+  const filePath = await window.api.openProjectPath();
+  if (!filePath) return;
+  const read = await window.api.readProject(filePath);
+  if (!read.ok) { toast('Could not open: ' + read.error, true); return; }
+  await loadProjectDoc(read, filePath);
+}
+
+async function loadProjectDoc(read, filePath) {
+  const p = read.doc && read.doc.project;
+  if (!p || !Array.isArray(p.slides)) { toast('Not a valid project file.', true); return; }
+  player.pause();
+
+  // Reset current state
+  project.slides = [];
+  assetMap.clear();
+  project._montage = null;
+  selectedId = null;
+  currentPlayingId = null;
+
+  // Settings
+  if (p.canvas) { project.canvas.w = p.canvas.w; project.canvas.h = p.canvas.h; }
+  project.fps = p.fps || 30;
+  project.loop = p.loop !== false;
+  project.protectFaces = p.protectFaces !== false;
+  project.showFaceOverlay = !!p.showFaceOverlay;
+  if (p.foreground) project.foreground = { shape: '16:9', scale: 1, align: 'center', ...p.foreground };
+  if (p.background) Object.assign(project.background, p.background);
+  if (p.defaults) {
+    project.defaults.durationSec = p.defaults.durationSec ?? 7;
+    project.defaults.transitionSec = p.defaults.transitionSec ?? 1;
+    project.defaults.kenBurns = { enabled: true, zoom: 0.12, direction: 'auto', ...(p.defaults.kenBurns || {}) };
+  }
+
+  const resolvedMap = new Map((read.resolved || []).map((r) => [r.id, r]));
+  const missing = [];
+  let maxNum = 0;
+  for (const sd of p.slides) {
+    const r = resolvedMap.get(sd.id) || {};
+    const src = r.path || sd.file;
+    const slide = {
+      id: sd.id || uid(), name: sd.name, src,
+      durationSec: sd.durationSec, transitionSec: sd.transitionSec,
+      kenBurns: sd.kenBurns, protect: sd.protect !== false, faces: sd.faces || [], missing: !r.exists,
+    };
+    project.slides.push(slide);
+    const m = String(slide.id).match(/(\d+)/); if (m) maxNum = Math.max(maxNum, +m[1]);
+    if (r.exists) {
+      try {
+        const img = await loadImage(src);
+        assetMap.set(slide.id, { img, bg: makeSlideBackground(img, project) });
+      } catch { slide.missing = true; }
+    }
+    if (slide.missing) {
+      const ph = makePlaceholder(slide.name);
+      assetMap.set(slide.id, { img: ph, bg: makeSlideBackground(ph, project) });
+      missing.push(slide);
+    }
+  }
+  uidCounter = Math.max(uidCounter, maxNum + 1);
+
+  rebuildMontage();
+  syncControlsFromProject();
+  refreshSlideList();
+  rebuild();
+  setProjectPath(filePath);
+  $('stageEmpty').classList.toggle('hidden', project.slides.length > 0);
+  if (project.slides.length) selectSlide(project.slides[0].id);
+  if (missing.length) openRelinkModal(missing);
+  else toast('Opened: ' + (read.name || basenameNoExt(filePath)));
+}
+
+// Reflect the loaded project's settings back into every control.
+function syncControlsFromProject() {
+  const sizeStr = project.canvas.w + 'x' + project.canvas.h;
+  const presetSel = $('canvasPreset');
+  const hasPreset = [...presetSel.options].some((o) => o.value === sizeStr);
+  presetSel.value = hasPreset ? sizeStr : 'custom';
+  $('customSize').classList.toggle('hidden', hasPreset);
+  $('canvasW').value = project.canvas.w; $('canvasH').value = project.canvas.h;
+  $('fps').value = String(project.fps);
+  $('fgShape').value = project.foreground.shape;
+  const fgPct = Math.round((project.foreground.scale || 1) * 100);
+  $('fgScale').value = fgPct; $('fgScaleVal').textContent = fgPct;
+  $('fgAlign').value = project.foreground.align;
+  $('defDuration').value = project.defaults.durationSec; $('durVal').textContent = project.defaults.durationSec.toFixed(1);
+  $('defTransition').value = project.defaults.transitionSec; $('transVal').textContent = project.defaults.transitionSec.toFixed(1);
+  const zoomPct = Math.round((project.defaults.kenBurns.zoom || 0) * 100);
+  $('defKbZoom').value = zoomPct; $('kbVal').textContent = zoomPct;
+  $('defKbDirection').value = project.defaults.kenBurns.enabled === false ? 'off'
+    : (['in', 'out'].includes(project.defaults.kenBurns.direction) ? project.defaults.kenBurns.direction : 'auto');
+  $('bgMode').value = project.background.mode;
+  const isColor = project.background.mode === 'color';
+  $('bgColorField').classList.toggle('hidden', !isColor);
+  $('bgBlurField').classList.toggle('hidden', isColor);
+  $('bgDimField').classList.toggle('hidden', isColor);
+  $('bgBlur').value = project.background.blur; $('blurVal').textContent = project.background.blur;
+  const dimPct = Math.round((project.background.dim || 0) * 100);
+  $('bgDim').value = dimPct; $('dimVal').textContent = dimPct;
+  $('bgColor').value = project.background.color || '#101014';
+  $('loopToggle').checked = project.loop;
+  $('protectFaces').checked = project.protectFaces;
+  $('showFaceOverlay').checked = project.showFaceOverlay;
+}
+
+// Relink missing photos by pointing at the folder they now live in.
+let relinkTargets = [];
+function openRelinkModal(missing) {
+  relinkTargets = missing;
+  $('relinkMsg').textContent = `${missing.length} photo${missing.length === 1 ? '' : 's'} could not be found at the saved location. Point to the folder they’re in — they’ll be re-linked by filename.`;
+  const ul = $('relinkList'); ul.innerHTML = '';
+  for (const s of missing) {
+    const li = document.createElement('li');
+    li.dataset.id = s.id;
+    li.innerHTML = `<span>${s.name || s.src}</span><span class="miss">missing</span>`;
+    ul.appendChild(li);
+  }
+  $('relinkModal').classList.remove('hidden');
+}
+$('btnRelinkSkip').addEventListener('click', () => $('relinkModal').classList.add('hidden'));
+$('btnRelinkLocate').addEventListener('click', async () => {
+  const folder = await window.api.openFolder();
+  if (!folder) return;
+  const names = relinkTargets.map((s) => s.name).filter(Boolean);
+  const res = await window.api.matchInFolder(folder, names);
+  if (!res.ok) { toast('Could not read folder: ' + res.error, true); return; }
+  let fixed = 0;
+  const stillMissing = [];
+  for (const s of relinkTargets) {
+    const hit = res.matches[s.name];
+    if (hit) {
+      try {
+        const img = await loadImage(hit);
+        assetMap.set(s.id, { img, bg: makeSlideBackground(img, project) });
+        s.src = hit; s.missing = false; fixed++;
+        const li = $('relinkList').querySelector(`li[data-id="${s.id}"]`);
+        if (li) li.querySelector('.miss').outerHTML = '<span class="ok">linked</span>';
+      } catch { stillMissing.push(s); }
+    } else stillMissing.push(s);
+  }
+  rebuildMontage();
+  refreshSlideList();
+  rebuild();
+  if (selectedId) refreshSelectedFacePanel();
+  relinkTargets = stillMissing;
+  if (stillMissing.length) toast(`Linked ${fixed}. ${stillMissing.length} still missing.`, true);
+  else { $('relinkModal').classList.add('hidden'); toast(`Linked ${fixed} photo${fixed === 1 ? '' : 's'}.`); }
+});
+
 // --- Keyboard --------------------------------------------------------------
 window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+    e.preventDefault();
+    if (project.slides.length) { $('collectFiles').checked = true; $('saveModal').classList.remove('hidden'); }
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'O')) {
+    e.preventDefault(); openProject(); return;
+  }
+  if (e.key === 'Escape') { $('saveModal').classList.add('hidden'); $('relinkModal').classList.add('hidden'); return; }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Space') { e.preventDefault(); player.toggle(); updateTimeUI(player.time, timeline.totalDuration); }
   if (e.code === 'Delete' && selectedId) removeSlide(selectedId);
 });
 
+// --- Face overlay on the preview (tracks the Ken Burns motion) -------------
+player.overlay = function (ctx, t) {
+  if (!project.showFaceOverlay) return;
+  const f = featuredAt(timeline, t);
+  if (!f) return;
+  const slide = project.slides[f.item.index];
+  const asset = slide && assetMap.get(slide.id);
+  if (!asset || !asset.img || !slide.faces || !slide.faces.length) return;
+  const cw = project.canvas.w;
+  const F = computeFrame(project);
+  const r = getSourceRect(f.item, asset.img, F.w, F.h, f.localU);
+  const iw = asset.img.width, ih = asset.img.height;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(108,140,255,0.9)';
+  ctx.lineWidth = Math.max(2, cw / 360);
+  for (const box of slide.faces) {
+    const x = F.x + (box.x * iw - r.sx) / r.sw * F.w;
+    const y = F.y + (box.y * ih - r.sy) / r.sh * F.h;
+    ctx.strokeRect(x, y, box.w * iw / r.sw * F.w, box.h * ih / r.sh * F.h);
+  }
+  ctx.restore();
+};
+
 // --- Init ------------------------------------------------------------------
 player.resizeToProject();
 player.seek(0);
 updateCount();
+if (!faceApiAvailable()) $('faceScanStatus').textContent = 'Face AI not loaded.';

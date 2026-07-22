@@ -3,6 +3,7 @@
 // finished RGBA frames and pipes them into bundled FFmpeg.
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 
 // Bundled FFmpeg binary. When packaged, it lives in app.asar.unpacked.
@@ -29,7 +30,9 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  const pageArg = process.argv.find((a) => a.startsWith('--page='));
+  const page = pageArg ? pageArg.slice('--page='.length) : 'index.html';
+  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', page));
   if (isDev) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
     // Surface renderer console + load failures on the main-process stdout so
@@ -76,6 +79,100 @@ ipcMain.handle('dialog:saveVideo', async (_e, { format }) => {
     filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
   });
   return res.canceled ? null : res.filePath;
+});
+
+// --- Project save / load ---------------------------------------------------
+ipcMain.handle('dialog:saveProjectPath', async (_e, { defaultName } = {}) => {
+  const res = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save project',
+    defaultPath: (defaultName || 'Untitled') + '.slideshow',
+    filters: [{ name: 'Slideshow project', extensions: ['slideshow'] }],
+  });
+  return res.canceled ? null : res.filePath;
+});
+
+ipcMain.handle('dialog:openProjectPath', async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Open project', properties: ['openFile'],
+    filters: [{ name: 'Slideshow project', extensions: ['slideshow', 'json'] }],
+  });
+  return res.canceled || !res.filePaths.length ? null : res.filePaths[0];
+});
+
+ipcMain.handle('dialog:openFolder', async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Locate photos folder', properties: ['openDirectory'],
+  });
+  return res.canceled || !res.filePaths.length ? null : res.filePaths[0];
+});
+
+// Write the project JSON; optionally collect all photos into "<name> files".
+ipcMain.handle('project:write', async (_e, { filePath, doc, collect }) => {
+  try {
+    const dir = path.dirname(filePath);
+    const base = path.basename(filePath, path.extname(filePath));
+    const slides = (doc.project && doc.project.slides) || [];
+
+    if (collect) {
+      const filesDirName = base + ' files';
+      const filesDir = path.join(dir, filesDirName);
+      fs.mkdirSync(filesDir, { recursive: true });
+      const used = new Set();
+      for (const s of slides) {
+        const srcAbs = s.file;
+        if (!srcAbs || !path.isAbsolute(srcAbs) || !fs.existsSync(srcAbs)) { s.missing = true; continue; }
+        const ext = path.extname(srcAbs);
+        const stem = path.basename(srcAbs, ext);
+        let candidate = stem + ext, i = 1;
+        while (used.has(candidate.toLowerCase())) candidate = `${stem}_${i++}${ext}`;
+        used.add(candidate.toLowerCase());
+        const dest = path.join(filesDir, candidate);
+        try {
+          if (path.resolve(srcAbs) !== path.resolve(dest)) fs.copyFileSync(srcAbs, dest);
+        } catch (err) { /* skip a file that can't be copied, keep going */ }
+        s.file = `${filesDirName}/${candidate}`; // relative, forward slashes
+      }
+    }
+
+    fs.writeFileSync(filePath, JSON.stringify(doc, null, 2), 'utf8');
+    return { ok: true, doc, dir };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// Read a project and report which photos resolve on disk.
+ipcMain.handle('project:read', async (_e, { filePath }) => {
+  try {
+    const doc = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const dir = path.dirname(filePath);
+    const slides = (doc.project && doc.project.slides) || [];
+    const resolved = slides.map((s) => {
+      const abs = path.isAbsolute(s.file) ? s.file : path.join(dir, s.file);
+      return { id: s.id, path: abs, exists: fs.existsSync(abs) };
+    });
+    return { ok: true, doc, dir, resolved, name: path.basename(filePath, path.extname(filePath)) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// Relink: find files in a folder by basename (case-insensitive).
+ipcMain.handle('fs:matchInFolder', async (_e, { folder, names }) => {
+  try {
+    const byLower = new Map();
+    for (const e of fs.readdirSync(folder, { withFileTypes: true })) {
+      if (e.isFile()) byLower.set(e.name.toLowerCase(), path.join(folder, e.name));
+    }
+    const matches = {};
+    for (const n of names) {
+      const hit = byLower.get(String(n).toLowerCase());
+      if (hit) matches[n] = hit;
+    }
+    return { ok: true, matches };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 // --- FFmpeg export ---------------------------------------------------------
