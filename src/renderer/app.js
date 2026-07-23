@@ -17,7 +17,8 @@ const project = {
   protectFaces: true,     // AI: keep detected faces in frame
   showFaceOverlay: false, // draw face boxes on the preview
   foreground: { shape: '16:9', scale: 1, align: 'center' }, // the photo frame
-  background: { mode: 'slide-blur', blur: 28, dim: 0.5, color: '#101014' },
+  background: { mode: 'slide-blur', blur: 22, dim: 0.5, color: '#101014' }, // blur is 0–50%
+  montageSeed: 12345, // shuffle re-rolls this
   defaults: {
     durationSec: 7,
     transitionSec: 1,
@@ -157,7 +158,7 @@ async function scanFaces(slides) {
 
 function rebuildMontage() {
   const imgs = project.slides.map((s) => assetMap.get(s.id)?.img).filter(Boolean);
-  project._montage = imgs.length ? makeMontage(imgs, project) : null;
+  project._montage = imgs.length ? makeMontage(imgs, project, project.montageSeed) : null;
 }
 
 function rebuildBackgrounds() {
@@ -391,6 +392,12 @@ $('bgMode').addEventListener('change', (e) => {
   $('bgColorField').classList.toggle('hidden', !isColor);
   $('bgBlurField').classList.toggle('hidden', isColor);
   $('bgDimField').classList.toggle('hidden', isColor);
+  $('bgShuffleField').classList.toggle('hidden', e.target.value !== 'montage');
+  player.redraw();
+});
+$('bgShuffle').addEventListener('click', () => {
+  project.montageSeed = Math.floor(Math.random() * 1e9);
+  rebuildMontage();
   player.redraw();
 });
 let bgDebounce = null;
@@ -532,6 +539,7 @@ function serializeProject() {
       protectFaces: project.protectFaces, showFaceOverlay: project.showFaceOverlay,
       foreground: { shape: project.foreground.shape, scale: project.foreground.scale, align: project.foreground.align },
       background: { mode: project.background.mode, blur: project.background.blur, dim: project.background.dim, color: project.background.color },
+      montageSeed: project.montageSeed,
       defaults: {
         durationSec: project.defaults.durationSec,
         transitionSec: project.defaults.transitionSec,
@@ -620,6 +628,7 @@ async function loadProjectDoc(read, filePath) {
   project.showFaceOverlay = !!p.showFaceOverlay;
   if (p.foreground) project.foreground = { shape: '16:9', scale: 1, align: 'center', ...p.foreground };
   if (p.background) Object.assign(project.background, p.background);
+  if (typeof p.montageSeed === 'number') project.montageSeed = p.montageSeed;
   if (p.defaults) {
     project.defaults.durationSec = p.defaults.durationSec ?? 7;
     project.defaults.transitionSec = p.defaults.transitionSec ?? 1;
@@ -688,6 +697,7 @@ function syncControlsFromProject() {
   $('bgColorField').classList.toggle('hidden', !isColor);
   $('bgBlurField').classList.toggle('hidden', isColor);
   $('bgDimField').classList.toggle('hidden', isColor);
+  $('bgShuffleField').classList.toggle('hidden', project.background.mode !== 'montage');
   $('bgBlur').value = project.background.blur; $('blurVal').textContent = project.background.blur;
   const dimPct = Math.round((project.background.dim || 0) * 100);
   $('bgDim').value = dimPct; $('dimVal').textContent = dimPct;
@@ -766,9 +776,9 @@ player.overlay = function (ctx, t) {
   const asset = slide && assetMap.get(slide.id);
   if (!asset || !asset.img || !slide.faces || !slide.faces.length) return;
   const cw = project.canvas.w;
-  const F = computeFrame(project);
-  const r = getSourceRect(f.item, asset.img, F.w, F.h, f.localU);
   const iw = asset.img.width, ih = asset.img.height;
+  const F = computeFrame(project, iw / ih);
+  const r = getSourceRect(f.item, asset.img, F.w, F.h, f.localU);
   ctx.save();
   ctx.strokeStyle = 'rgba(108,140,255,0.9)';
   ctx.lineWidth = Math.max(2, cw / 360);

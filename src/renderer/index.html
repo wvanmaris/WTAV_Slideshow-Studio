@@ -135,6 +135,7 @@
             <option value="4:3">4:3</option>
             <option value="3:2">3:2</option>
             <option value="1:1">Square</option>
+            <option value="original">Keep original (per photo)</option>
             <option value="fill">Fill whole canvas</option>
           </select>
         </label>
@@ -206,13 +207,16 @@
           </select>
         </label>
         <label class="field" id="bgBlurField">
-          <span>Blur <b id="blurVal">28</b></span>
-          <input type="range" id="bgBlur" min="4" max="80" step="1" value="28" />
+          <span>Blur <b id="blurVal">22</b>%</span>
+          <input type="range" id="bgBlur" min="0" max="50" step="1" value="22" />
         </label>
         <label class="field" id="bgDimField">
           <span>Dim <b id="dimVal">50</b>%</span>
           <input type="range" id="bgDim" min="0" max="90" step="1" value="50" />
         </label>
+        <div class="field hidden" id="bgShuffleField">
+          <button id="bgShuffle" class="btn ghost full">🔀 Shuffle montage</button>
+        </div>
         <label class="field hidden" id="bgColorField">
           <span>Colour</span>
           <input type="color" id="bgColor" value="#101014" />

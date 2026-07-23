@@ -112,10 +112,14 @@ function frameAspect(shape, cw, ch) {
 // The rectangle (in canvas px) where the sharp photo is drawn. The blurred
 // background always fills the whole canvas; this frame floats on top. On a
 // wide/odd canvas the frame stays ~16:9 so faces are easy to keep in view.
-export function computeFrame(project) {
+// With shape 'original', the frame matches the photo's own aspect ratio
+// (imageAspect) so it shows whole — e.g. a portrait leaves side background.
+export function computeFrame(project, imageAspect) {
   const cw = project.canvas.w, ch = project.canvas.h;
   const fg = project.foreground || {};
-  const aspect = frameAspect(fg.shape || '16:9', cw, ch);
+  const aspect = (fg.shape === 'original' && imageAspect)
+    ? imageAspect
+    : frameAspect(fg.shape || '16:9', cw, ch);
   const scale = clamp(fg.scale ?? 1, 0.3, 1);
 
   // Largest `aspect` box that fits the canvas (contain), then scaled down.
@@ -277,12 +281,14 @@ function drawBackground(ctx, project, asset, cw, ch) {
   else { ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, cw, ch); }
 }
 
-function drawSlideLayer(layerCtx, project, item, asset, localU, cw, ch, F) {
+function drawSlideLayer(layerCtx, project, item, asset, localU, cw, ch) {
   layerCtx.clearRect(0, 0, cw, ch);
   layerCtx.fillStyle = '#000000';
   layerCtx.fillRect(0, 0, cw, ch);
   drawBackground(layerCtx, project, asset, cw, ch); // background fills the canvas
   if (asset && asset.img) {
+    // Frame is per-slide: 'original' shape uses this photo's aspect ratio.
+    const F = computeFrame(project, asset.img.width / asset.img.height);
     const framed = F.w < cw - 1 || F.h < ch - 1;
     if (framed) {
       // Soft shadow so the photo lifts off the blurred background.
@@ -306,7 +312,6 @@ function drawSlideLayer(layerCtx, project, item, asset, localU, cw, ch, F) {
 export function renderFrame(ctx, project, timeline, assets, tSec, scratch) {
   const cw = project.canvas.w, ch = project.canvas.h;
   const { items, cycle } = timeline;
-  const F = computeFrame(project);
 
   ctx.globalAlpha = 1;
   ctx.fillStyle = '#000000';
@@ -340,7 +345,7 @@ export function renderFrame(ctx, project, timeline, assets, tSec, scratch) {
 
   for (const op of ops) {
     const asset = assets[op.item.index];
-    drawSlideLayer(layerCtx, project, op.item, asset, op.localU, cw, ch, F);
+    drawSlideLayer(layerCtx, project, op.item, asset, op.localU, cw, ch);
     ctx.globalAlpha = op.alpha;
     ctx.drawImage(layerCanvas, 0, 0, cw, ch);
   }

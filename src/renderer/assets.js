@@ -36,7 +36,8 @@ function drawCover(ctx, img, cw, ch) {
 export function makeSlideBackground(img, project) {
   const cw = project.canvas.w, ch = project.canvas.h;
   const bg = project.background || {};
-  const blurPx = (bg.blur ?? 28) * (cw / 1280); // scale blur with resolution
+  // Blur is a 0–50% amount; map it to pixels (scaled with resolution).
+  const blurPx = ((bg.blur ?? 22) / 100) * 130 * (cw / 1280);
   const dim = bg.dim ?? 0.5;
 
   const c = makeCanvas(cw, ch);
@@ -60,7 +61,7 @@ export function makeSlideBackground(img, project) {
 export function makeMontage(images, project, seed = 12345) {
   const cw = project.canvas.w, ch = project.canvas.h;
   const bg = project.background || {};
-  const blurPx = (bg.blur ?? 28) * (cw / 1280) * 1.6; // montage blurs harder
+  const blurPx = ((bg.blur ?? 22) / 100) * 130 * (cw / 1280) * 1.5; // montage blurs harder
   const dim = bg.dim ?? 0.5;
 
   // Simple seeded PRNG (mulberry32-ish) for repeatable placement.
