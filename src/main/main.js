@@ -1,7 +1,7 @@
 // main.js — Electron main process. Owns the window, native dialogs, and the
 // FFmpeg encoder. Rendering happens in the renderer; this process just receives
 // finished RGBA frames and pipes them into bundled FFmpeg.
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -23,7 +23,8 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 680,
     backgroundColor: '#15171c',
-    title: 'Slideshow Studio',
+    title: 'WTAV Slideshow Studio',
+    icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -59,6 +60,12 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// --- App info / external links ---------------------------------------------
+ipcMain.handle('app:version', () => app.getVersion());
+ipcMain.handle('shell:openExternal', (_e, { url }) => {
+  if (/^(https?:|mailto:)/i.test(url)) shell.openExternal(url);
 });
 
 // --- Native dialogs --------------------------------------------------------

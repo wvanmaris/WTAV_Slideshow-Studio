@@ -305,11 +305,8 @@ function reorder(fromId, toId, after) {
 // --- Selection + per-slide settings ---------------------------------------
 function selectSlide(id) {
   selectedId = id;
-  const panel = $('slideSettings');
-  if (!id) { panel.classList.add('hidden'); refreshSlideList(); return; }
-  const s = project.slides.find((x) => x.id === id);
-  if (!s) { panel.classList.add('hidden'); return; }
-  panel.classList.remove('hidden');
+  const s = id ? project.slides.find((x) => x.id === id) : null;
+  if (!s) { selectedId = null; setActiveTab(activeTab); refreshSlideList(); return; }
   $('slideName').textContent = s.name ? '· ' + s.name : '';
   $('sDuration').value = s.durationSec ?? '';
   $('sTransition').value = s.transitionSec ?? '';
@@ -318,8 +315,39 @@ function selectSlide(id) {
     : '';
   $('sProtect').checked = s.protect !== false;
   refreshSelectedFacePanel();
+  setActiveTab('photo'); // jump to the Photo tab and reveal the selected-photo panel
   refreshSlideList();
 }
+
+// --- Settings tabs ---------------------------------------------------------
+let activeTab = 'canvas';
+function setActiveTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.tabbar .tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.settings-panel [data-tab]').forEach((el) => {
+    if (el.classList.contains('tab')) return;
+    const belongs = el.dataset.tab === name;
+    if (el.id === 'slideSettings') { el.classList.toggle('hidden', !(belongs && selectedId)); return; }
+    if (el.id === 'noPhotoHint') { el.classList.toggle('hidden', !(belongs && !selectedId)); return; }
+    el.classList.toggle('hidden', !belongs);
+  });
+}
+document.querySelectorAll('.tabbar .tab').forEach((b) => b.addEventListener('click', () => setActiveTab(b.dataset.tab)));
+
+// --- New project / About ---------------------------------------------------
+$('btnNewProject').addEventListener('click', () => {
+  if (project.slides.length && !window.confirm('Start a new project? Unsaved changes will be lost.')) return;
+  location.reload(); // cleanest full reset
+});
+$('btnAbout').addEventListener('click', async () => {
+  try { $('aboutVersion').textContent = await window.api.getVersion(); } catch { $('aboutVersion').textContent = '—'; }
+  $('aboutModal').classList.remove('hidden');
+});
+$('btnCloseAbout').addEventListener('click', () => $('aboutModal').classList.add('hidden'));
+$('btnFeedback').addEventListener('click', async () => {
+  let v = '—'; try { v = await window.api.getVersion(); } catch {}
+  window.api.openExternal('mailto:wtavpost@gmail.com?subject=' + encodeURIComponent('WTAV Slideshow Studio feedback (v' + v + ')'));
+});
 
 // Draw the selected photo with its detected face boxes in the side panel.
 function refreshSelectedFacePanel() {
@@ -1039,7 +1067,7 @@ window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'O')) {
     e.preventDefault(); openProject(); return;
   }
-  if (e.key === 'Escape') { $('saveModal').classList.add('hidden'); $('relinkModal').classList.add('hidden'); return; }
+  if (e.key === 'Escape') { $('saveModal').classList.add('hidden'); $('relinkModal').classList.add('hidden'); $('aboutModal').classList.add('hidden'); return; }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Space') { e.preventDefault(); player.toggle(); syncAudioPlayState(); updateTimeUI(player.time, timeline.totalDuration); }
   if (e.code === 'Delete' && selectedId) removeSlide(selectedId);
@@ -1075,6 +1103,7 @@ player.seek(0);
 updateCount();
 updateTimingUI();
 syncTitleControls();
+setActiveTab('canvas');
 // Preload the title fonts so the canvas uses them (not a fallback), then redraw.
 Promise.all(TITLE_FONTS.map((f) => document.fonts.load(`32px "${f}"`)))
   .then(() => { updateTitlePreview(); player.redraw(); })

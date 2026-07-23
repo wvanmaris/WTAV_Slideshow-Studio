@@ -4,13 +4,14 @@
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; img-src 'self' file: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' file: blob: data:; font-src 'self' file: data:; worker-src 'self' blob:;" />
-  <title>Slideshow Studio</title>
+  <title>WTAV Slideshow Studio</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-left">
-      <div class="brand"><span class="dot"></span> Slideshow Studio</div>
+      <div class="brand"><span class="dot"></span> WTAV Slideshow Studio</div>
+      <button id="btnNewProject" class="btn tiny ghost">New</button>
       <button id="btnOpenProject" class="btn tiny ghost">Open…</button>
       <button id="btnSaveProject" class="btn tiny ghost">Save…</button>
       <span id="projectName" class="muted small"></span>
@@ -18,6 +19,7 @@
     <div class="topbar-actions">
       <button id="btnAddPhotos" class="btn primary">+ Add photos</button>
       <span id="countLabel" class="muted"></span>
+      <button id="btnAbout" class="btn tiny ghost" title="About">About</button>
     </div>
   </header>
 
@@ -50,7 +52,16 @@
     <!-- RIGHT: settings -->
     <aside class="panel settings-panel">
       <!-- Per-slide (shown when a slide is selected) -->
-      <section id="slideSettings" class="settings-group hidden">
+      <div class="tabbar">
+        <button class="tab" data-tab="photo">Photo</button>
+        <button class="tab" data-tab="canvas">Canvas</button>
+        <button class="tab" data-tab="style">Style</button>
+        <button class="tab" data-tab="timing">Timing</button>
+        <button class="tab" data-tab="export">Export</button>
+      </div>
+
+      <p id="noPhotoHint" class="hint" data-tab="photo" style="padding:14px 16px 0;">Select a photo in the list to edit its duration, motion and face options.</p>
+      <section id="slideSettings" class="settings-group hidden" data-tab="photo">
         <h2>Selected photo <span id="slideName" class="muted small"></span></h2>
         <label class="field">
           <span>Duration (seconds)</span>
@@ -94,7 +105,7 @@
       </section>
 
       <!-- Canvas -->
-      <section class="settings-group">
+      <section class="settings-group" data-tab="canvas">
         <h2>Canvas</h2>
         <label class="field">
           <span>Size</span>
@@ -125,7 +136,7 @@
       </section>
 
       <!-- Music & length -->
-      <section class="settings-group">
+      <section class="settings-group" data-tab="timing">
         <h2>Music &amp; length</h2>
         <div class="field" id="musicRow">
           <button id="btnAddMusic" class="btn ghost full">♪ Add music…</button>
@@ -167,7 +178,7 @@
       </section>
 
       <!-- Title card -->
-      <section class="settings-group">
+      <section class="settings-group" data-tab="style">
         <h2>Title card</h2>
         <p class="hint">An opening/closing card, e.g. name and dates. Up to 4 lines.</p>
         <div style="display:flex; gap:18px; margin-bottom:10px;">
@@ -198,7 +209,7 @@
       </section>
 
       <!-- Photo frame (foreground) -->
-      <section class="settings-group">
+      <section class="settings-group" data-tab="canvas">
         <h2>Photo frame</h2>
         <p class="hint">How large the sharp photo sits on the canvas. On a wide canvas, keep it ~16:9 so the background shows and faces stay framed.</p>
         <label class="field">
@@ -242,7 +253,7 @@
       </section>
 
       <!-- Timing defaults -->
-      <section class="settings-group">
+      <section class="settings-group" data-tab="timing">
         <h2>Defaults</h2>
         <label class="field">
           <span>Seconds per photo <b id="durVal">7.0</b></span>
@@ -268,7 +279,7 @@
       </section>
 
       <!-- Collage mode -->
-      <section class="settings-group">
+      <section class="settings-group" data-tab="style">
         <h2>Collage (wide canvas)</h2>
         <p class="hint">Show several photos at once, fading in and out independently. Best on a wide canvas.</p>
         <label class="check-field"><input type="checkbox" id="collageEnabled" /><span>Enable collage mode</span></label>
@@ -283,7 +294,7 @@
       </section>
 
       <!-- Face protection (AI) -->
-      <section class="settings-group">
+      <section class="settings-group" data-tab="photo">
         <h2>Faces (AI)</h2>
         <p class="hint">Runs 100% on this computer — no photo ever leaves the machine.</p>
         <label class="check-field">
@@ -298,7 +309,7 @@
       </section>
 
       <!-- Background -->
-      <section class="settings-group">
+      <section class="settings-group" data-tab="style">
         <h2>Background fill</h2>
         <p class="hint">Fills the space around photos that don't match the canvas shape.</p>
         <label class="field">
@@ -327,7 +338,7 @@
       </section>
 
       <!-- Export -->
-      <section class="settings-group export-group">
+      <section class="settings-group export-group" data-tab="export">
         <h2>Export</h2>
         <label class="field">
           <span>Format</span>
@@ -385,6 +396,19 @@
       <div class="modal-actions">
         <button id="btnRelinkSkip" class="btn ghost">Continue without them</button>
         <button id="btnRelinkLocate" class="btn primary">Locate folder…</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- About -->
+  <div id="aboutModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>WTAV Slideshow Studio</h3>
+      <p class="muted small" style="margin:0 0 10px;">Version <span id="aboutVersion">…</span></p>
+      <p class="hint">Create looping tribute slideshows from photos — Ken Burns motion, crossfades, blurred backgrounds, music, title cards, frames and collage. Runs fully offline; nothing leaves your computer.</p>
+      <div class="modal-actions">
+        <button id="btnFeedback" class="btn ghost">Send feedback</button>
+        <button id="btnCloseAbout" class="btn primary">Close</button>
       </div>
     </div>
   </div>

@@ -86,6 +86,10 @@ body {
 .preview-area { min-height: 0; }
 .slides-panel { border-right: 1px solid var(--line); }
 .settings-panel { border-left: 1px solid var(--line); padding-bottom: 40px; }
+.tabbar { position: sticky; top: 0; z-index: 6; display: flex; gap: 2px; padding: 8px 8px 0; background: var(--panel); border-bottom: 1px solid var(--line); }
+.tab { flex: 1; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--muted); font-size: 12px; font-family: var(--font); padding: 9px 4px; cursor: pointer; border-radius: 6px 6px 0 0; }
+.tab:hover { color: var(--text); background: var(--panel-2); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); background: var(--panel-2); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 8px; }
 .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0; }
 
