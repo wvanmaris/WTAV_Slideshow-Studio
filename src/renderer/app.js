@@ -20,6 +20,7 @@ const project = {
   showFaceOverlay: false, // draw face boxes on the preview
   foreground: { shape: '16:9', scale: 1, align: 'center' }, // the photo frame
   photoBorder: { style: 'none', widthPct: 3 }, // decorative frame around each photo
+  collage: { enabled: false, maxConcurrent: 3, photoSec: 5 }, // multi-photo ambient mode
   background: { mode: 'slide-blur', blur: 22, dim: 0.5, color: '#101014' }, // blur is 0–50%
   montageSeed: 12345, // shuffle re-rolls this
   timing: { mode: 'per-photo', totalSec: 60, _autoDur: 7 }, // 'total' fits a fixed length / music
@@ -374,6 +375,11 @@ $('btnRedetect').addEventListener('click', async () => {
   await scanFaces([s]);
 });
 $('btnRemoveSlide').addEventListener('click', () => { if (selectedId) removeSlide(selectedId); });
+
+// Collage mode
+$('collageEnabled').addEventListener('change', (e) => { project.collage.enabled = e.target.checked; rebuild(); });
+$('collageMax').addEventListener('input', (e) => { project.collage.maxConcurrent = parseInt(e.target.value, 10); $('collageMaxVal').textContent = e.target.value; rebuild(); });
+$('collagePhotoSec').addEventListener('input', (e) => { project.collage.photoSec = parseFloat(e.target.value); $('collagePhotoSecVal').textContent = e.target.value; rebuild(); });
 
 // Global AI toggles
 $('protectFaces').addEventListener('change', (e) => { project.protectFaces = e.target.checked; rebuild(); });
@@ -756,6 +762,7 @@ function serializeProject() {
       protectFaces: project.protectFaces, showFaceOverlay: project.showFaceOverlay,
       foreground: { shape: project.foreground.shape, scale: project.foreground.scale, align: project.foreground.align },
       photoBorder: { style: project.photoBorder.style, widthPct: project.photoBorder.widthPct },
+      collage: { enabled: project.collage.enabled, maxConcurrent: project.collage.maxConcurrent, photoSec: project.collage.photoSec },
       background: { mode: project.background.mode, blur: project.background.blur, dim: project.background.dim, color: project.background.color },
       montageSeed: project.montageSeed,
       timing: { mode: project.timing.mode, totalSec: project.timing.totalSec },
@@ -850,6 +857,7 @@ async function loadProjectDoc(read, filePath) {
   project.showFaceOverlay = !!p.showFaceOverlay;
   if (p.foreground) project.foreground = { shape: '16:9', scale: 1, align: 'center', ...p.foreground };
   if (p.photoBorder) project.photoBorder = { style: p.photoBorder.style || 'none', widthPct: p.photoBorder.widthPct ?? 3 };
+  if (p.collage) project.collage = { enabled: !!p.collage.enabled, maxConcurrent: p.collage.maxConcurrent ?? 3, photoSec: p.collage.photoSec ?? 5 };
   if (p.background) Object.assign(project.background, p.background);
   if (typeof p.montageSeed === 'number') project.montageSeed = p.montageSeed;
   if (p.timing) project.timing = { mode: p.timing.mode || 'per-photo', totalSec: p.timing.totalSec || 60, _autoDur: 7 };
@@ -931,6 +939,9 @@ function syncControlsFromProject() {
   $('borderStyle').value = project.photoBorder.style;
   $('borderWidthField').classList.toggle('hidden', project.photoBorder.style === 'none');
   $('borderWidth').value = project.photoBorder.widthPct; $('borderWidthVal').textContent = project.photoBorder.widthPct;
+  $('collageEnabled').checked = project.collage.enabled;
+  $('collageMax').value = project.collage.maxConcurrent; $('collageMaxVal').textContent = project.collage.maxConcurrent;
+  $('collagePhotoSec').value = project.collage.photoSec; $('collagePhotoSecVal').textContent = project.collage.photoSec;
   $('defDuration').value = project.defaults.durationSec; $('durVal').textContent = project.defaults.durationSec.toFixed(1);
   $('defTransition').value = project.defaults.transitionSec; $('transVal').textContent = project.defaults.transitionSec.toFixed(1);
   const zoomPct = Math.round((project.defaults.kenBurns.zoom || 0) * 100);

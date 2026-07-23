@@ -24,7 +24,7 @@ the engine music needs) and are being built first.
 - Choice of 5–10 free, elegant fonts (bundled/offline, license-clear).
 - Typical use: name + dates as an opening (and/or closing) card.
 
-## 4. Multi-photo collage on wide canvases  *(nice to have)*
+## 4. Multi-photo collage on wide canvases  ✅ built (on main) — nice to have
 - On a wide canvas, show several photos at once in different positions, fading
   in and out independently for a livelier, richer feel.
 - Settings such as a maximum number of simultaneous photos.

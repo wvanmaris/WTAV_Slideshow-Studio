@@ -35,6 +35,13 @@ const PAN_K = 0.72; // how far across the available slack a directional pan trav
 // crossfades back into the first, making the exported file loop seamlessly.
 // ---------------------------------------------------------------------------
 export function buildTimeline(project) {
+  // Collage is a distinct ambient mode (multiple photos at once); it loops over
+  // one period and ignores the crossfade timeline / titles.
+  if (project.collage && project.collage.enabled && project.slides.length) {
+    const ci = collageInfo(project);
+    return { items: [], collage: true, cycle: ci.L, totalDuration: ci.L, loop: true };
+  }
+
   const d = project.defaults;
   const protectGlobal = project.protectFaces !== false;
   const timing = project.timing || {};
@@ -408,6 +415,75 @@ function drawSlideLayer(layerCtx, project, item, asset, localU, cw, ch) {
 }
 
 // ---------------------------------------------------------------------------
+// Collage mode — several photos on screen at once, each fading in/out at a
+// seeded position. Deterministic and loopable over period L = nPhotos*appDur.
+// ---------------------------------------------------------------------------
+function collageInfo(project) {
+  const c = project.collage || {};
+  const nPhotos = project.slides.length;
+  const N = Math.max(1, Math.min(c.maxConcurrent ?? 3, nPhotos || 1));
+  const appDur = Math.max(2, c.photoSec ?? 5);
+  const fadeDur = Math.min(1.4, appDur * 0.35);
+  const L = (nPhotos || 1) * appDur;
+  return { nPhotos, N, appDur, fadeDur, L };
+}
+
+function drawCollage(ctx, project, assets, tSec) {
+  const cw = project.canvas.w, ch = project.canvas.h;
+  const bg = project.background || {};
+  if (bg.mode === 'montage' && project._montage) ctx.drawImage(project._montage, 0, 0, cw, ch);
+  else { ctx.fillStyle = bg.color || '#0b0b0e'; ctx.fillRect(0, 0, cw, ch); }
+
+  const { nPhotos, N, appDur, fadeDur, L } = collageInfo(project);
+  if (!nPhotos || L <= 0) return;
+  const t = ((tSec % L) + L) % L;
+  const stagger = appDur / N;
+  const border = project.photoBorder || { style: 'none' };
+  const hasB = border.style && border.style !== 'none';
+
+  for (let k = 0; k < N; k++) {
+    const localT = t + k * stagger;
+    const appIndex = Math.floor(localT / appDur);
+    const phase = localT - appIndex * appDur;
+    const alpha = Math.min(clamp(phase / fadeDur, 0, 1), clamp((appDur - phase) / fadeDur, 0, 1));
+    if (alpha <= 0.01) continue;
+    const photoIdx = (((appIndex * N + k) % nPhotos) + nPhotos) % nPhotos;
+    const asset = assets[photoIdx];
+    if (!asset || !asset.img) continue;
+
+    // Placement is periodic with nPhotos so the whole collage loops seamlessly.
+    const rnd = seededRandom('col' + k + '-' + ((appIndex % nPhotos + nPhotos) % nPhotos));
+    let th = ch * (0.34 + rnd() * 0.28);
+    let tw = th * (1.05 + rnd() * 0.55);
+    tw = Math.min(tw, cw * 0.9); th = Math.min(th, ch * 0.9);
+    const tx = rnd() * Math.max(0, cw - tw);
+    const ty = rnd() * Math.max(0, ch - th);
+    const rot = (rnd() - 0.5) * 0.18;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(tx + tw / 2, ty + th / 2);
+    ctx.rotate(rot);
+    const F = { x: -tw / 2, y: -th / 2, w: tw, h: th };
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = th * 0.05; ctx.shadowOffsetY = th * 0.02;
+    ctx.fillStyle = '#000'; ctx.fillRect(F.x, F.y, F.w, F.h);
+    ctx.restore();
+    const inner = hasB ? photoInnerRect(project, F) : { x: F.x, y: F.y, w: F.w, h: F.h, bpx: 0 };
+    if (hasB) drawFrameFill(ctx, border.style, F, inner.bpx);
+    const img = asset.img;
+    const scale = Math.max(inner.w / img.width, inner.h / img.height);
+    const dw = img.width * scale, dh = img.height * scale;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(inner.x, inner.y, inner.w, inner.h); ctx.clip();
+    ctx.drawImage(img, inner.x + (inner.w - dw) / 2, inner.y + (inner.h - dh) / 2, dw, dh);
+    ctx.restore();
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------------------------------------------------------------------------
 // The one function everything calls.
 // ---------------------------------------------------------------------------
 export function renderFrame(ctx, project, timeline, assets, tSec, scratch) {
@@ -417,6 +493,8 @@ export function renderFrame(ctx, project, timeline, assets, tSec, scratch) {
   ctx.globalAlpha = 1;
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, cw, ch);
+
+  if (timeline.collage) { drawCollage(ctx, project, assets, tSec); return; }
   if (!items.length) return;
 
   // Loop: wrap time into the cycle. One-shot: clamp to the real duration
