@@ -191,6 +191,11 @@ select { cursor: pointer; }
 .bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #a97bff); transition: width .1s linear; }
 .progress-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 
+/* Music chip */
+.music-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin-bottom: 12px; }
+.music-chip #musicName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#totalLenField input[type="number"] { width: 64px; }
+
 /* Face inspection */
 .check-field { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; margin-bottom: 10px; cursor: pointer; line-height: 1.35; }
 .check-field input { margin-top: 2px; accent-color: var(--accent); flex: none; }

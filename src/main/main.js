@@ -71,6 +71,15 @@ ipcMain.handle('dialog:openImages', async () => {
   return res.canceled ? [] : res.filePaths;
 });
 
+ipcMain.handle('dialog:openAudio', async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Add music',
+    properties: ['openFile'],
+    filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'flac', 'opus'] }],
+  });
+  return res.canceled || !res.filePaths.length ? null : res.filePaths[0];
+});
+
 ipcMain.handle('dialog:saveVideo', async (_e, { format }) => {
   const ext = format === 'webm' ? 'webm' : 'mp4';
   const res = await dialog.showSaveDialog(mainWindow, {
@@ -176,8 +185,8 @@ ipcMain.handle('fs:matchInFolder', async (_e, { folder, names }) => {
 });
 
 // --- FFmpeg export ---------------------------------------------------------
-function buildFfmpegArgs({ width, height, fps, format, outputPath, quality }) {
-  const input = [
+function buildFfmpegArgs({ width, height, fps, format, outputPath, quality, audioPath }) {
+  const args = [
     '-y',
     '-f', 'rawvideo',
     '-pix_fmt', 'rgba',
@@ -185,27 +194,20 @@ function buildFfmpegArgs({ width, height, fps, format, outputPath, quality }) {
     '-r', String(fps),
     '-i', 'pipe:0',
   ];
+  if (audioPath) args.push('-i', audioPath, '-map', '0:v:0', '-map', '1:a:0');
+
   if (format === 'webm') {
-    return [
-      ...input,
-      '-c:v', 'libvpx-vp9',
-      '-pix_fmt', 'yuv420p',
-      '-b:v', '0',
-      '-crf', String(quality ?? 30),
-      '-row-mt', '1',
-      outputPath,
-    ];
+    args.push('-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-b:v', '0', '-crf', String(quality ?? 30), '-row-mt', '1');
+    if (audioPath) args.push('-c:a', 'libopus', '-b:a', '160k');
+  } else {
+    // Default: MP4 / H.264 for maximum player compatibility.
+    args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'medium', '-crf', String(quality ?? 18), '-movflags', '+faststart');
+    if (audioPath) args.push('-c:a', 'aac', '-b:a', '192k');
   }
-  // Default: MP4 / H.264 for maximum player compatibility.
-  return [
-    ...input,
-    '-c:v', 'libx264',
-    '-pix_fmt', 'yuv420p',
-    '-preset', 'medium',
-    '-crf', String(quality ?? 18),
-    '-movflags', '+faststart',
-    outputPath,
-  ];
+  // End when the video (frame stream) ends, so trailing music is trimmed.
+  if (audioPath) args.push('-shortest');
+  args.push(outputPath);
+  return args;
 }
 
 ipcMain.handle('export:begin', async (_e, opts) => {

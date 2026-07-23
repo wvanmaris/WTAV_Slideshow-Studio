@@ -3,7 +3,7 @@
 import { renderFrame } from './render.js';
 
 export async function exportVideo(project, timeline, assets, opts) {
-  const { format, quality, fps, outputPath, onProgress, shouldCancel } = opts;
+  const { format, quality, fps, outputPath, onProgress, shouldCancel, audioPath } = opts;
   const cw = project.canvas.w, ch = project.canvas.h;
   const totalFrames = Math.max(1, Math.round(timeline.totalDuration * fps));
 
@@ -12,7 +12,7 @@ export async function exportVideo(project, timeline, assets, opts) {
   const scratchCanvas = new OffscreenCanvas(cw, ch);
   const scratch = { canvas: scratchCanvas, ctx: scratchCanvas.getContext('2d') };
 
-  const { id } = await window.api.exportBegin({ width: cw, height: ch, fps, format, outputPath, quality });
+  const { id } = await window.api.exportBegin({ width: cw, height: ch, fps, format, outputPath, quality, audioPath });
 
   try {
     for (let f = 0; f < totalFrames; f++) {

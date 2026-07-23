@@ -124,6 +124,48 @@
         </label>
       </section>
 
+      <!-- Music & length -->
+      <section class="settings-group">
+        <h2>Music &amp; length</h2>
+        <div class="field" id="musicRow">
+          <button id="btnAddMusic" class="btn ghost full">♪ Add music…</button>
+        </div>
+        <div id="musicInfo" class="music-chip hidden">
+          <span id="musicName" class="small"></span>
+          <button id="btnRemoveMusic" class="btn tiny ghost" title="Remove music">✕</button>
+        </div>
+        <label class="field">
+          <span>Length</span>
+          <select id="timingMode">
+            <option value="per-photo" selected>Per photo (own duration)</option>
+            <option value="total">Fit a fixed total length</option>
+          </select>
+        </label>
+        <div class="field-row" id="totalLenField">
+          <input type="number" id="totalLenMin" min="0" max="60" step="1" value="1" />
+          <span class="muted small">min</span>
+          <input type="number" id="totalLenSec" min="0" max="59" step="1" value="0" />
+          <span class="muted small">sec</span>
+        </div>
+        <p class="hint" id="autoDurHint"></p>
+        <label class="field">
+          <span>Fade in from black <b id="fadeInVal">0</b>s</span>
+          <input type="range" id="fadeIn" min="0" max="6" step="0.5" value="0" />
+        </label>
+        <label class="field">
+          <span>Ending</span>
+          <select id="endMode">
+            <option value="fadeout" selected>Fade to black</option>
+            <option value="freeze">Hold last frame</option>
+          </select>
+        </label>
+        <label class="field" id="fadeOutField">
+          <span>Fade out to black <b id="fadeOutVal">0</b>s</span>
+          <input type="range" id="fadeOut" min="0" max="8" step="0.5" value="0" />
+        </label>
+        <p class="hint">Fades apply when looping is off (music turns looping off automatically).</p>
+      </section>
+
       <!-- Photo frame (foreground) -->
       <section class="settings-group">
         <h2>Photo frame</h2>
@@ -254,6 +296,7 @@
   </main>
 
   <div id="toast" class="toast hidden"></div>
+  <audio id="previewAudio" preload="auto"></audio>
 
   <!-- Save options modal -->
   <div id="saveModal" class="modal-overlay hidden">

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   openImages: () => ipcRenderer.invoke('dialog:openImages'),
+  openAudio: () => ipcRenderer.invoke('dialog:openAudio'),
   saveVideo: (format) => ipcRenderer.invoke('dialog:saveVideo', { format }),
   exportBegin: (opts) => ipcRenderer.invoke('export:begin', opts),
   exportFrame: (id, buffer) => ipcRenderer.invoke('export:frame', { id, buffer }),

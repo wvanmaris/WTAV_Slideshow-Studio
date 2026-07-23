@@ -39,8 +39,12 @@ export function buildTimeline(project) {
   const n = project.slides.length;
   const protectGlobal = project.protectFaces !== false;
 
+  const timing = project.timing || {};
   const items = project.slides.map((s, i) => {
-    const durationSec = s.durationSec ?? d.durationSec;
+    // In 'total' mode, unlocked photos use the auto-computed duration so the
+    // whole show fits a fixed length (or the music). A manual duration locks it.
+    const autoDur = timing.mode === 'total' ? (timing._autoDur ?? d.durationSec) : d.durationSec;
+    const durationSec = s.durationSec ?? autoDur;
     const transitionAfter = s.transitionSec ?? d.transitionSec;
     const kbSetting = s.kenBurns ? { ...d.kenBurns, ...s.kenBurns } : d.kenBurns;
     const faces = s.faces || [];
@@ -318,7 +322,11 @@ export function renderFrame(ctx, project, timeline, assets, tSec, scratch) {
   ctx.fillRect(0, 0, cw, ch);
   if (!items.length) return;
 
-  let t = cycle > 0 ? ((tSec % cycle) + cycle) % cycle : 0;
+  // Loop: wrap time into the cycle. One-shot: clamp to the real duration
+  // (don't modulo by `cycle`, which is shorter than totalDuration).
+  let t = timeline.loop
+    ? (cycle > 0 ? ((tSec % cycle) + cycle) % cycle : 0)
+    : clamp(tSec, 0, timeline.totalDuration);
 
   const ops = [];
   const offsets = timeline.loop ? [-cycle, 0, cycle] : [0];
@@ -350,6 +358,20 @@ export function renderFrame(ctx, project, timeline, assets, tSec, scratch) {
     ctx.drawImage(layerCanvas, 0, 0, cw, ch);
   }
   ctx.globalAlpha = 1;
+
+  // Fade in from / out to black (one-shot only — a loop shouldn't flash black).
+  if (!timeline.loop && project.fade) {
+    const total = timeline.totalDuration;
+    const fin = project.fade.inSec || 0;
+    const fout = project.fade.endMode === 'fadeout' ? (project.fade.outSec || 0) : 0;
+    let env = 1;
+    if (fin > 0) env = Math.min(env, clamp(tSec / fin, 0, 1));
+    if (fout > 0) env = Math.min(env, clamp((total - tSec) / fout, 0, 1));
+    if (env < 1) {
+      ctx.fillStyle = `rgba(0,0,0,${(1 - env).toFixed(4)})`;
+      ctx.fillRect(0, 0, cw, ch);
+    }
+  }
 }
 
 // Which slide is featured (most opaque) at time t — for the preview overlay.

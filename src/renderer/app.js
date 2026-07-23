@@ -19,6 +19,9 @@ const project = {
   foreground: { shape: '16:9', scale: 1, align: 'center' }, // the photo frame
   background: { mode: 'slide-blur', blur: 22, dim: 0.5, color: '#101014' }, // blur is 0–50%
   montageSeed: 12345, // shuffle re-rolls this
+  timing: { mode: 'per-photo', totalSec: 60, _autoDur: 7 }, // 'total' fits a fixed length / music
+  audio: { src: null, name: null, durationSec: 0 },
+  fade: { inSec: 0, outSec: 0, endMode: 'fadeout' }, // fades apply when loop is off
   defaults: {
     durationSec: 7,
     transitionSec: 1,
@@ -56,15 +59,40 @@ function assetsArray() {
 function getState() {
   return { project, timeline, assets: assetsArray() };
 }
+// In 'total' mode, distribute time so the whole show fits the target length
+// (fixed length, or the music). Photos with a manual duration are "locked"; the
+// rest share what remains — so tweaking one photo shifts the others.
+function applyTiming() {
+  const t = project.timing;
+  if (t.mode !== 'total') return;
+  const n = project.slides.length;
+  if (!n) { t._autoDur = project.defaults.durationSec; return; }
+  const target = project.audio.src ? project.audio.durationSec : t.totalSec;
+  let transSum = 0;
+  for (let i = 0; i < n - 1; i++) transSum += (project.slides[i].transitionSec ?? project.defaults.transitionSec);
+  const requiredDurSum = Math.max(0, target) + transSum; // total playtime + overlaps
+  let lockedSum = 0, unlocked = 0;
+  for (const s of project.slides) { if (s.durationSec != null) lockedSum += s.durationSec; else unlocked++; }
+  t._autoDur = unlocked === 0 ? project.defaults.durationSec
+    : Math.max(0.5, (requiredDurSum - lockedSum) / unlocked);
+}
+
 function rebuild() {
+  applyTiming();
   timeline = buildTimeline(project);
   player.resizeToProject();
   player.seek(Math.min(player.time, timeline.totalDuration || 0));
   updateTimeUI(player.time, timeline.totalDuration);
   updateCount();
+  updateAutoDurHint();
 }
 
-const player = new Player(canvasEl, getState, (t, dur) => { updateTimeUI(t, dur); updateNowPlaying(t); });
+const player = new Player(canvasEl, getState, (t, dur) => {
+  updateTimeUI(t, dur);
+  updateNowPlaying(t);
+  // Pause preview music when playback stops (e.g. one-shot reached the end).
+  if (!player.playing) { const a = $('previewAudio'); if (a && !a.paused) a.pause(); }
+});
 
 // Mark the photo currently shown in the preview in the list (independent of
 // selection). Only touches DOM when the featured slide changes, so it's cheap
@@ -209,10 +237,11 @@ function refreshSlideList() {
       + (s.missing ? ' missing' : '');
     li.draggable = true;
     li.dataset.id = s.id;
-    const dur = s.durationSec ?? project.defaults.durationSec;
+    const effDur = s.durationSec ?? (project.timing.mode === 'total' ? project.timing._autoDur : project.defaults.durationSec);
+    const durTxt = (Math.round(effDur * 10) / 10) + 's' + (s.durationSec == null && project.timing.mode === 'total' ? ' (auto)' : '');
     const sub = s.missing
       ? '<span class="warn">⚠ missing</span>'
-      : `${dur}s${s.kenBurns && s.kenBurns.enabled === false ? ' · no motion' : ''}`;
+      : `${durTxt}${s.kenBurns && s.kenBurns.enabled === false ? ' · no motion' : ''}`;
     li.innerHTML = `
       <span class="playmark" title="Now showing"></span>
       <span class="num">${i + 1}</span>
@@ -415,6 +444,90 @@ $('bgColor').addEventListener('input', (e) => { project.background.color = e.tar
 
 $('loopToggle').addEventListener('change', (e) => { project.loop = e.target.checked; rebuild(); });
 
+// --- Music & length --------------------------------------------------------
+function getAudioDuration(url) {
+  return new Promise((res) => {
+    const a = new Audio();
+    a.addEventListener('loadedmetadata', () => res(a.duration || 0));
+    a.addEventListener('error', () => res(0));
+    a.src = url;
+  });
+}
+function updateAutoDurHint() {
+  const el = $('autoDurHint');
+  if (!el) return;
+  if (project.timing.mode !== 'total') { el.textContent = ''; return; }
+  const target = project.audio.src ? project.audio.durationSec : project.timing.totalSec;
+  el.textContent = `≈ ${(project.timing._autoDur || 0).toFixed(1)}s per photo to fill ${fmtTime(target)}.`;
+}
+function updateTimingUI() {
+  const total = project.timing.mode === 'total';
+  const hasMusic = !!project.audio.src;
+  $('totalLenField').classList.toggle('hidden', !total || hasMusic);
+  $('musicInfo').classList.toggle('hidden', !hasMusic);
+  $('musicRow').classList.toggle('hidden', hasMusic);
+  $('fadeOutField').classList.toggle('hidden', project.fade.endMode !== 'fadeout');
+  if (hasMusic) $('musicName').textContent = `♪ ${project.audio.name} · ${fmtTime(project.audio.durationSec)}`;
+  updateAutoDurHint();
+}
+
+$('btnAddMusic').addEventListener('click', async () => {
+  const path = await window.api.openAudio();
+  if (!path) return;
+  const url = srcToUrl(path);
+  const dur = await getAudioDuration(url);
+  if (!dur) { toast('Could not read that audio file.', true); return; }
+  project.audio = { src: path, name: path.split(/[\\/]/).pop(), durationSec: dur };
+  project.timing.mode = 'total';
+  project.loop = false;
+  if (!project.fade.inSec && !project.fade.outSec) { project.fade.inSec = 2; project.fade.outSec = 3; }
+  $('previewAudio').src = url;
+  syncControlsFromProject();
+  rebuild();
+  toast(`Music added: ${project.audio.name} (${fmtTime(dur)})`);
+});
+$('btnRemoveMusic').addEventListener('click', () => {
+  project.audio = { src: null, name: null, durationSec: 0 };
+  const pa = $('previewAudio'); pa.pause(); pa.removeAttribute('src');
+  syncControlsFromProject();
+  rebuild();
+});
+
+$('timingMode').addEventListener('change', (e) => {
+  project.timing.mode = e.target.value;
+  updateTimingUI();
+  rebuild();
+});
+function readTotalInputs() {
+  const m = parseInt($('totalLenMin').value, 10) || 0;
+  const s = parseInt($('totalLenSec').value, 10) || 0;
+  return Math.max(5, m * 60 + s);
+}
+const onTotalLen = () => { project.timing.totalSec = readTotalInputs(); rebuild(); };
+$('totalLenMin').addEventListener('input', onTotalLen);
+$('totalLenSec').addEventListener('input', onTotalLen);
+
+$('fadeIn').addEventListener('input', (e) => { project.fade.inSec = parseFloat(e.target.value); $('fadeInVal').textContent = e.target.value; player.redraw(); });
+$('fadeOut').addEventListener('input', (e) => { project.fade.outSec = parseFloat(e.target.value); $('fadeOutVal').textContent = e.target.value; player.redraw(); });
+$('endMode').addEventListener('change', (e) => {
+  project.fade.endMode = e.target.value;
+  $('fadeOutField').classList.toggle('hidden', e.target.value !== 'fadeout');
+  player.redraw();
+});
+
+// Keep the preview music roughly in sync with the playhead.
+function syncAudioPlayState() {
+  const a = $('previewAudio');
+  if (!project.audio.src) { a.pause(); return; }
+  if (player.playing) {
+    a.currentTime = Math.min(player.time, Math.max(0, project.audio.durationSec - 0.05));
+    a.volume = 0.85;
+    a.play().catch(() => {});
+  } else {
+    a.pause();
+  }
+}
+
 // --- Transport -------------------------------------------------------------
 function fmtTime(sec) {
   sec = Math.max(0, sec || 0);
@@ -428,13 +541,14 @@ function updateTimeUI(t, dur) {
   if (!scrub.dragging) scrub.value = dur > 0 ? Math.round((t / dur) * 1000) : 0;
   $('btnPlay').textContent = player.playing ? '❚❚' : '►';
 }
-$('btnPlay').addEventListener('click', () => { player.toggle(); updateTimeUI(player.time, timeline.totalDuration); });
+$('btnPlay').addEventListener('click', () => { player.toggle(); syncAudioPlayState(); updateTimeUI(player.time, timeline.totalDuration); });
 const scrub = $('scrub');
 scrub.addEventListener('input', (e) => {
   scrub.dragging = true;
   const dur = timeline.totalDuration || 0;
   player.pause();
   player.seek((parseInt(e.target.value, 10) / 1000) * dur);
+  syncAudioPlayState();
 });
 scrub.addEventListener('change', () => { scrub.dragging = false; });
 
@@ -482,6 +596,7 @@ async function runExport() {
   exporting = true;
   cancelRequested = false;
   player.pause();
+  $('previewAudio').pause();
   $('btnExport').disabled = true;
   $('exportProgress').classList.remove('hidden');
   $('progressFill').style.width = '0%';
@@ -494,6 +609,7 @@ async function runExport() {
       quality: QUALITY[format][qualityKey],
       fps: project.fps,
       outputPath,
+      audioPath: project.audio.src || null,
       onProgress: (p, f, total) => {
         $('progressFill').style.width = (p * 100).toFixed(1) + '%';
         $('progressLabel').textContent = `Rendering frame ${f} / ${total}`;
@@ -540,6 +656,9 @@ function serializeProject() {
       foreground: { shape: project.foreground.shape, scale: project.foreground.scale, align: project.foreground.align },
       background: { mode: project.background.mode, blur: project.background.blur, dim: project.background.dim, color: project.background.color },
       montageSeed: project.montageSeed,
+      timing: { mode: project.timing.mode, totalSec: project.timing.totalSec },
+      audio: { src: project.audio.src, name: project.audio.name, durationSec: project.audio.durationSec },
+      fade: { inSec: project.fade.inSec, outSec: project.fade.outSec, endMode: project.fade.endMode },
       defaults: {
         durationSec: project.defaults.durationSec,
         transitionSec: project.defaults.transitionSec,
@@ -629,6 +748,13 @@ async function loadProjectDoc(read, filePath) {
   if (p.foreground) project.foreground = { shape: '16:9', scale: 1, align: 'center', ...p.foreground };
   if (p.background) Object.assign(project.background, p.background);
   if (typeof p.montageSeed === 'number') project.montageSeed = p.montageSeed;
+  if (p.timing) project.timing = { mode: p.timing.mode || 'per-photo', totalSec: p.timing.totalSec || 60, _autoDur: 7 };
+  if (p.fade) project.fade = { inSec: p.fade.inSec || 0, outSec: p.fade.outSec || 0, endMode: p.fade.endMode || 'fadeout' };
+  project.audio = p.audio && p.audio.src
+    ? { src: p.audio.src, name: p.audio.name, durationSec: p.audio.durationSec || 0 }
+    : { src: null, name: null, durationSec: 0 };
+  const pa = $('previewAudio');
+  if (project.audio.src) pa.src = srcToUrl(project.audio.src); else pa.removeAttribute('src');
   if (p.defaults) {
     project.defaults.durationSec = p.defaults.durationSec ?? 7;
     project.defaults.transitionSec = p.defaults.transitionSec ?? 1;
@@ -705,6 +831,14 @@ function syncControlsFromProject() {
   $('loopToggle').checked = project.loop;
   $('protectFaces').checked = project.protectFaces;
   $('showFaceOverlay').checked = project.showFaceOverlay;
+  // Music & length
+  $('timingMode').value = project.timing.mode;
+  $('totalLenMin').value = Math.floor(project.timing.totalSec / 60);
+  $('totalLenSec').value = Math.round(project.timing.totalSec % 60);
+  $('fadeIn').value = project.fade.inSec; $('fadeInVal').textContent = project.fade.inSec;
+  $('fadeOut').value = project.fade.outSec; $('fadeOutVal').textContent = project.fade.outSec;
+  $('endMode').value = project.fade.endMode;
+  updateTimingUI();
 }
 
 // Relink missing photos by pointing at the folder they now live in.
@@ -763,7 +897,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') { $('saveModal').classList.add('hidden'); $('relinkModal').classList.add('hidden'); return; }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.code === 'Space') { e.preventDefault(); player.toggle(); updateTimeUI(player.time, timeline.totalDuration); }
+  if (e.code === 'Space') { e.preventDefault(); player.toggle(); syncAudioPlayState(); updateTimeUI(player.time, timeline.totalDuration); }
   if (e.code === 'Delete' && selectedId) removeSlide(selectedId);
 });
 
@@ -794,4 +928,5 @@ player.overlay = function (ctx, t) {
 player.resizeToProject();
 player.seek(0);
 updateCount();
+updateTimingUI();
 if (!faceApiAvailable()) $('faceScanStatus').textContent = 'Face AI not loaded.';
