@@ -822,6 +822,11 @@ $('btnConfirmSave').addEventListener('click', async () => {
         if (slide) slide.src = dir + '/' + sd.file;
       }
     }
+    const ad = res.doc.project.audio;
+    if (ad && ad.src && !/^[a-zA-Z]:[\\/]/.test(ad.src) && !ad.src.startsWith('/')) {
+      project.audio.src = dir + '/' + ad.src; // repoint to the copied music file
+      $('previewAudio').src = srcToUrl(project.audio.src);
+    }
     refreshSlideList();
   }
   setProjectPath(filePath);
@@ -862,9 +867,17 @@ async function loadProjectDoc(read, filePath) {
   if (typeof p.montageSeed === 'number') project.montageSeed = p.montageSeed;
   if (p.timing) project.timing = { mode: p.timing.mode || 'per-photo', totalSec: p.timing.totalSec || 60, _autoDur: 7 };
   if (p.fade) project.fade = { inSec: p.fade.inSec || 0, outSec: p.fade.outSec || 0, endMode: p.fade.endMode || 'fadeout' };
-  project.audio = p.audio && p.audio.src
-    ? { src: p.audio.src, name: p.audio.name, durationSec: p.audio.durationSec || 0 }
-    : { src: null, name: null, durationSec: 0 };
+  if (p.audio && p.audio.src) {
+    const ar = read.audioResolved;
+    if (ar && ar.exists) {
+      project.audio = { src: ar.path, name: p.audio.name, durationSec: p.audio.durationSec || 0 };
+    } else {
+      project.audio = { src: null, name: null, durationSec: 0 };
+      toast('Music file not found — export will have no audio.', true);
+    }
+  } else {
+    project.audio = { src: null, name: null, durationSec: 0 };
+  }
   const pa = $('previewAudio');
   if (project.audio.src) pa.src = srcToUrl(project.audio.src); else pa.removeAttribute('src');
   if (p.titleCard) {

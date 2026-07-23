@@ -141,6 +141,21 @@ ipcMain.handle('project:write', async (_e, { filePath, doc, collect }) => {
         } catch (err) { /* skip a file that can't be copied, keep going */ }
         s.file = `${filesDirName}/${candidate}`; // relative, forward slashes
       }
+
+      // Also collect the music track, if any.
+      const audio = doc.project && doc.project.audio;
+      if (audio && audio.src && path.isAbsolute(audio.src) && fs.existsSync(audio.src)) {
+        const ext = path.extname(audio.src);
+        const stem = path.basename(audio.src, ext);
+        let candidate = stem + ext, i = 1;
+        while (used.has(candidate.toLowerCase())) candidate = `${stem}_${i++}${ext}`;
+        used.add(candidate.toLowerCase());
+        const dest = path.join(filesDir, candidate);
+        try {
+          if (path.resolve(audio.src) !== path.resolve(dest)) fs.copyFileSync(audio.src, dest);
+          audio.src = `${filesDirName}/${candidate}`;
+        } catch (err) { /* keep absolute path if copy fails */ }
+      }
     }
 
     fs.writeFileSync(filePath, JSON.stringify(doc, null, 2), 'utf8');
@@ -160,7 +175,13 @@ ipcMain.handle('project:read', async (_e, { filePath }) => {
       const abs = path.isAbsolute(s.file) ? s.file : path.join(dir, s.file);
       return { id: s.id, path: abs, exists: fs.existsSync(abs) };
     });
-    return { ok: true, doc, dir, resolved, name: path.basename(filePath, path.extname(filePath)) };
+    let audioResolved = null;
+    const audio = doc.project && doc.project.audio;
+    if (audio && audio.src) {
+      const abs = path.isAbsolute(audio.src) ? audio.src : path.join(dir, audio.src);
+      audioResolved = { path: abs, exists: fs.existsSync(abs) };
+    }
+    return { ok: true, doc, dir, resolved, audioResolved, name: path.basename(filePath, path.extname(filePath)) };
   } catch (err) {
     return { ok: false, error: err.message };
   }

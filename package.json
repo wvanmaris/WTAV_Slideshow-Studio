@@ -1,6 +1,6 @@
 {
   "name": "slideshow-studio",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Create looping tribute slideshows from photos with Ken Burns motion, crossfades and blurred backgrounds. Exports MP4/WebM via bundled FFmpeg.",
   "author": "",
   "license": "MIT",
