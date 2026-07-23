@@ -34,7 +34,7 @@ export class Player {
 
   drawAt(t) {
     const { project, timeline, assets } = this.getState();
-    if (!timeline || !timeline.items.length) {
+    if (!timeline || (!timeline.items.length && !timeline.collage)) {
       this.ctx.fillStyle = '#000';
       this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
       return;
@@ -57,7 +57,7 @@ export class Player {
   play() {
     if (this.playing) return;
     const { timeline } = this.getState();
-    if (!timeline || !timeline.items.length) return;
+    if (!timeline || (!timeline.items.length && !timeline.collage)) return;
     this.playing = true;
     this._last = performance.now();
     const loop = (now) => {
