@@ -29,7 +29,7 @@ the engine music needs) and are being built first.
   in and out independently for a livelier, richer feel.
 - Settings such as a maximum number of simultaneous photos.
 
-## 5. Per-photo border / frame
+## 5. Per-photo border / frame  ✅ built (on main)
 - Optional decorative frame around each photo so they read like real, classic
   picture frames passing by.
 - Choice of **none** or several chic/classic frame styles.

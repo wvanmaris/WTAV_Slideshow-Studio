@@ -1,6 +1,6 @@
 // app.js — UI state and wiring. Holds the project model, prepares assets,
 // drives the preview Player, and runs exports.
-import { buildTimeline, featuredAt, getSourceRect, computeFrame, renderTitleCard } from './render.js';
+import { buildTimeline, featuredAt, getSourceRect, computeFrame, renderTitleCard, photoInnerRect } from './render.js';
 import { loadImage, makeSlideBackground, makeMontage } from './assets.js';
 import { Player } from './preview.js';
 import { exportVideo } from './exporter.js';
@@ -19,6 +19,7 @@ const project = {
   protectFaces: true,     // AI: keep detected faces in frame
   showFaceOverlay: false, // draw face boxes on the preview
   foreground: { shape: '16:9', scale: 1, align: 'center' }, // the photo frame
+  photoBorder: { style: 'none', widthPct: 3 }, // decorative frame around each photo
   background: { mode: 'slide-blur', blur: 22, dim: 0.5, color: '#101014' }, // blur is 0–50%
   montageSeed: 12345, // shuffle re-rolls this
   timing: { mode: 'per-photo', totalSec: 60, _autoDur: 7 }, // 'total' fits a fixed length / music
@@ -408,6 +409,16 @@ $('fgScale').addEventListener('input', (e) => {
   rebuild();
 });
 $('fgAlign').addEventListener('change', (e) => { project.foreground.align = e.target.value; rebuild(); });
+$('borderStyle').addEventListener('change', (e) => {
+  project.photoBorder.style = e.target.value;
+  $('borderWidthField').classList.toggle('hidden', e.target.value === 'none');
+  player.redraw();
+});
+$('borderWidth').addEventListener('input', (e) => {
+  project.photoBorder.widthPct = parseFloat(e.target.value);
+  $('borderWidthVal').textContent = e.target.value;
+  player.redraw();
+});
 
 $('defDuration').addEventListener('input', (e) => {
   project.defaults.durationSec = parseFloat(e.target.value);
@@ -744,6 +755,7 @@ function serializeProject() {
       fps: project.fps, loop: project.loop,
       protectFaces: project.protectFaces, showFaceOverlay: project.showFaceOverlay,
       foreground: { shape: project.foreground.shape, scale: project.foreground.scale, align: project.foreground.align },
+      photoBorder: { style: project.photoBorder.style, widthPct: project.photoBorder.widthPct },
       background: { mode: project.background.mode, blur: project.background.blur, dim: project.background.dim, color: project.background.color },
       montageSeed: project.montageSeed,
       timing: { mode: project.timing.mode, totalSec: project.timing.totalSec },
@@ -837,6 +849,7 @@ async function loadProjectDoc(read, filePath) {
   project.protectFaces = p.protectFaces !== false;
   project.showFaceOverlay = !!p.showFaceOverlay;
   if (p.foreground) project.foreground = { shape: '16:9', scale: 1, align: 'center', ...p.foreground };
+  if (p.photoBorder) project.photoBorder = { style: p.photoBorder.style || 'none', widthPct: p.photoBorder.widthPct ?? 3 };
   if (p.background) Object.assign(project.background, p.background);
   if (typeof p.montageSeed === 'number') project.montageSeed = p.montageSeed;
   if (p.timing) project.timing = { mode: p.timing.mode || 'per-photo', totalSec: p.timing.totalSec || 60, _autoDur: 7 };
@@ -915,6 +928,9 @@ function syncControlsFromProject() {
   const fgPct = Math.round((project.foreground.scale || 1) * 100);
   $('fgScale').value = fgPct; $('fgScaleVal').textContent = fgPct;
   $('fgAlign').value = project.foreground.align;
+  $('borderStyle').value = project.photoBorder.style;
+  $('borderWidthField').classList.toggle('hidden', project.photoBorder.style === 'none');
+  $('borderWidth').value = project.photoBorder.widthPct; $('borderWidthVal').textContent = project.photoBorder.widthPct;
   $('defDuration').value = project.defaults.durationSec; $('durVal').textContent = project.defaults.durationSec.toFixed(1);
   $('defTransition').value = project.defaults.transitionSec; $('transVal').textContent = project.defaults.transitionSec.toFixed(1);
   const zoomPct = Math.round((project.defaults.kenBurns.zoom || 0) * 100);
@@ -1016,14 +1032,15 @@ player.overlay = function (ctx, t) {
   const cw = project.canvas.w;
   const iw = asset.img.width, ih = asset.img.height;
   const F = computeFrame(project, iw / ih);
-  const r = getSourceRect(f.item, asset.img, F.w, F.h, f.localU);
+  const P = photoInnerRect(project, F);
+  const r = getSourceRect(f.item, asset.img, P.w, P.h, f.localU);
   ctx.save();
   ctx.strokeStyle = 'rgba(108,140,255,0.9)';
   ctx.lineWidth = Math.max(2, cw / 360);
   for (const box of slide.faces) {
-    const x = F.x + (box.x * iw - r.sx) / r.sw * F.w;
-    const y = F.y + (box.y * ih - r.sy) / r.sh * F.h;
-    ctx.strokeRect(x, y, box.w * iw / r.sw * F.w, box.h * ih / r.sh * F.h);
+    const x = P.x + (box.x * iw - r.sx) / r.sw * P.w;
+    const y = P.y + (box.y * ih - r.sy) / r.sh * P.h;
+    ctx.strokeRect(x, y, box.w * iw / r.sw * P.w, box.h * ih / r.sh * P.h);
   }
   ctx.restore();
 };

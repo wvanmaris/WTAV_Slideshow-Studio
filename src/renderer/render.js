@@ -338,6 +338,39 @@ function drawTitle(ctx, project, cw, ch) {
   ctx.shadowBlur = 0;
 }
 
+// Where the photo is drawn inside its frame — inset by the decorative border.
+export function photoInnerRect(project, F) {
+  const b = project.photoBorder;
+  if (!b || b.style === 'none') return { x: F.x, y: F.y, w: F.w, h: F.h, bpx: 0 };
+  const bpx = Math.max(2, Math.min(F.w, F.h) * (b.widthPct ?? 3) / 100);
+  return { x: F.x + bpx, y: F.y + bpx, w: F.w - 2 * bpx, h: F.h - 2 * bpx, bpx };
+}
+
+// Draw a decorative picture frame filling F; the photo is drawn on top, inset.
+function drawFrameFill(ctx, style, F, bpx) {
+  const { x, y, w, h } = F;
+  const inset = (k) => ctx.strokeRect(x + bpx * k, y + bpx * k, w - 2 * bpx * k, h - 2 * bpx * k);
+  if (style === 'white' || style === 'mat') {
+    ctx.fillStyle = style === 'mat' ? '#f2ede2' : '#ffffff';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = Math.max(1, bpx * 0.06); inset(0.9);
+  } else if (style === 'black') {
+    ctx.fillStyle = '#141414'; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = Math.max(1, bpx * 0.08); inset(0.9);
+  } else if (style === 'wood') {
+    const g = ctx.createLinearGradient(x, y, x, y + h);
+    g.addColorStop(0, '#6b4a2b'); g.addColorStop(0.5, '#8a5f38'); g.addColorStop(1, '#553a20');
+    ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(0,0,0,0.28)'; ctx.lineWidth = Math.max(1, bpx * 0.08); inset(0.88);
+  } else if (style === 'gold') {
+    ctx.fillStyle = '#3a2e12'; ctx.fillRect(x, y, w, h);
+    const g = ctx.createLinearGradient(x, y, x + bpx, y + bpx);
+    g.addColorStop(0, '#a9791a'); g.addColorStop(0.4, '#e8c25a'); g.addColorStop(0.6, '#f6e39a'); g.addColorStop(1, '#a9791a');
+    ctx.fillStyle = g; ctx.fillRect(x + bpx * 0.18, y + bpx * 0.18, w - 0.36 * bpx, h - 0.36 * bpx);
+    ctx.fillStyle = '#2c220e'; ctx.fillRect(x + bpx * 0.82, y + bpx * 0.82, w - 1.64 * bpx, h - 1.64 * bpx);
+  }
+}
+
 // Exposed for the settings-panel live preview of the title card.
 export function renderTitleCard(ctx, project, cw, ch) {
   ctx.clearRect(0, 0, cw, ch);
@@ -353,9 +386,11 @@ function drawSlideLayer(layerCtx, project, item, asset, localU, cw, ch) {
   if (asset && asset.img) {
     // Frame is per-slide: 'original' shape uses this photo's aspect ratio.
     const F = computeFrame(project, asset.img.width / asset.img.height);
-    const framed = F.w < cw - 1 || F.h < ch - 1;
+    const border = project.photoBorder || { style: 'none' };
+    const hasBorder = border.style && border.style !== 'none';
+    const framed = hasBorder || F.w < cw - 1 || F.h < ch - 1;
     if (framed) {
-      // Soft shadow so the photo lifts off the blurred background.
+      // Soft shadow so the photo/frame lifts off the background.
       layerCtx.save();
       layerCtx.shadowColor = 'rgba(0,0,0,0.55)';
       layerCtx.shadowBlur = Math.max(8, F.h * 0.035);
@@ -364,9 +399,11 @@ function drawSlideLayer(layerCtx, project, item, asset, localU, cw, ch) {
       layerCtx.fillRect(F.x, F.y, F.w, F.h);
       layerCtx.restore();
     }
-    // Ken Burns uses the FRAME aspect (≈16:9), drawn into the frame rect.
-    const r = getSourceRect(item, asset.img, F.w, F.h, localU);
-    layerCtx.drawImage(asset.img, r.sx, r.sy, r.sw, r.sh, F.x, F.y, F.w, F.h);
+    const inner = photoInnerRect(project, F);
+    if (hasBorder) drawFrameFill(layerCtx, border.style, F, inner.bpx);
+    // Ken Burns uses the inner (photo) rect's aspect, drawn into it.
+    const r = getSourceRect(item, asset.img, inner.w, inner.h, localU);
+    layerCtx.drawImage(asset.img, r.sx, r.sy, r.sw, r.sh, inner.x, inner.y, inner.w, inner.h);
   }
 }
 
