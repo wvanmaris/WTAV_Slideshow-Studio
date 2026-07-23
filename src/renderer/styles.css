@@ -67,9 +67,13 @@ body {
 .layout {
   display: grid;
   grid-template-columns: 240px 1fr 320px;
+  /* Bound the row to the viewport so a tall (portrait) preview can't push the
+     transport bar off-screen — the stage scales the canvas down instead. */
+  grid-template-rows: minmax(0, 1fr);
   height: calc(100% - 52px);
 }
-.panel { background: var(--panel); overflow-y: auto; }
+.panel { background: var(--panel); overflow-y: auto; min-height: 0; }
+.preview-area { min-height: 0; }
 .slides-panel { border-right: 1px solid var(--line); }
 .settings-panel { border-left: 1px solid var(--line); padding-bottom: 40px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 8px; }

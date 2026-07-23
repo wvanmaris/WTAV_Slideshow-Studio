@@ -80,23 +80,34 @@ export function makeMontage(images, project, seed = 12345) {
 
   const pool = images.filter(Boolean);
   if (pool.length) {
-    // Lay tiles on a loose grid with jitter/rotation so it reads as a collage.
     const cols = Math.min(5, Math.max(3, Math.round(Math.sqrt(pool.length))));
     const rows = Math.ceil(pool.length / cols) || 1;
+    const cells = cols * rows;
     const tileW = cw / cols, tileH = ch / rows;
+
+    // Assign photos to cells via a seeded shuffle, so a new seed genuinely
+    // rearranges WHICH photo goes WHERE (not just tiny jitter). Fill/repeat to
+    // cover every cell, then shuffle the whole assignment.
+    const assign = [];
+    for (let i = 0; i < cells; i++) assign.push(pool[i % pool.length]);
+    for (let i = assign.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      const t = assign[i]; assign[i] = assign[j]; assign[j] = t;
+    }
+
     let k = 0;
     for (let r = 0; r < rows; r++) {
       for (let col = 0; col < cols; col++) {
-        const img = pool[k % pool.length];
-        k++;
-        const cx = tileW * (col + 0.5) + (rnd() - 0.5) * tileW * 0.5;
-        const cy = tileH * (r + 0.5) + (rnd() - 0.5) * tileH * 0.5;
+        const img = assign[k++];
+        // Large jitter + rotation + scale spread so it reads as a real collage.
+        const cx = tileW * (col + 0.5) + (rnd() - 0.5) * tileW * 0.85;
+        const cy = tileH * (r + 0.5) + (rnd() - 0.5) * tileH * 0.85;
         const cover = Math.max(tileW / img.width, tileH / img.height);
-        const s = cover * (1.1 + rnd() * 0.5);
+        const s = cover * (1.15 + rnd() * 0.7);
         const dw = img.width * s, dh = img.height * s;
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate((rnd() - 0.5) * 0.5); // up to ~14deg tilt
+        ctx.rotate((rnd() - 0.5) * 0.9); // up to ~26deg tilt
         ctx.globalAlpha = 0.9;
         ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
         ctx.restore();
