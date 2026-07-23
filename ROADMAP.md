@@ -17,7 +17,7 @@ the engine music needs) and are being built first.
   automatically to fill it.
 - Manual per-photo duration "locks" that photo; the rest share what's left.
 
-## 3. Built-in title generator
+## 3. Built-in title generator  ✅ built (on main)
 - Multi-line title card (max 4 lines), e.g. line 1 = name, line 2 = "born –
   died".
 - Per-line font size; adjustable line spacing.

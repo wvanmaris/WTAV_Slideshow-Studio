@@ -1,0 +1,15 @@
+The bundled title fonts are licensed under the SIL Open Font License, Version 1.1.
+Full license: https://openfontlicense.org  (OFL-1.1)
+
+Fonts and their copyright holders:
+- Playfair Display   — Copyright the Playfair Project Authors
+- Cormorant Garamond — Copyright the Cormorant Project Authors (Christian Thalmann / Catharsis Fonts)
+- EB Garamond        — Copyright Georg Duffner and Octavio Pardo
+- Cinzel             — Copyright Natanael Gama (Ndiscovered)
+- Libre Baskerville  — Copyright Impallari Type
+- Lora               — Copyright Cyreal
+- Great Vibes        — Copyright TypeSETit, LLC
+- Tangerine          — Copyright Toshi Omagari
+
+The OFL permits bundling and redistribution of these font files with this
+application. Rendering text to video (rasterised glyphs) is unrestricted.

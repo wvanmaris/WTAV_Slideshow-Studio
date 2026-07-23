@@ -36,11 +36,28 @@ const PAN_K = 0.72; // how far across the available slack a directional pan trav
 // ---------------------------------------------------------------------------
 export function buildTimeline(project) {
   const d = project.defaults;
-  const n = project.slides.length;
   const protectGlobal = project.protectFaces !== false;
-
   const timing = project.timing || {};
-  const items = project.slides.map((s, i) => {
+  const tc = project.titleCard || {};
+
+  // Ordered sources: an optional title card, the photos, an optional end card.
+  const sources = [];
+  if (tc.atStart) sources.push({ type: 'title' });
+  project.slides.forEach((s, i) => sources.push({ type: 'photo', slide: s, slideIndex: i }));
+  if (tc.atEnd) sources.push({ type: 'title' });
+  const n = sources.length;
+
+  const items = sources.map((src, i) => {
+    if (src.type === 'title') {
+      return {
+        index: -1, type: 'title',
+        durationSec: Math.max(1, tc.durationSec ?? 5),
+        transitionAfter: d.transitionSec,
+        kbSetting: { enabled: false }, seed: 'title' + i, faces: [], protect: false,
+        _rk: null, _rects: null,
+      };
+    }
+    const s = src.slide;
     // In 'total' mode, unlocked photos use the auto-computed duration so the
     // whole show fits a fixed length (or the music). A manual duration locks it.
     const autoDur = timing.mode === 'total' ? (timing._autoDur ?? d.durationSec) : d.durationSec;
@@ -49,16 +66,15 @@ export function buildTimeline(project) {
     const kbSetting = s.kenBurns ? { ...d.kenBurns, ...s.kenBurns } : d.kenBurns;
     const faces = s.faces || [];
     return {
-      index: i,
+      index: src.slideIndex, type: 'photo',
       id: s.id,
       durationSec,
       transitionAfter,
       kbSetting,
-      seed: s.id ?? i,
+      seed: s.id ?? src.slideIndex,
       faces,
       protect: protectGlobal && s.protect !== false && faces.length > 0,
-      _rk: null,     // cache key for resolved rects
-      _rects: null,  // cached { start, end }
+      _rk: null, _rects: null,
     };
   });
 
@@ -285,10 +301,54 @@ function drawBackground(ctx, project, asset, cw, ch) {
   else { ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, cw, ch); }
 }
 
+// Draw a title card: background + up to 4 centred lines of text.
+function drawTitle(ctx, project, cw, ch) {
+  const tc = project.titleCard || {};
+  const bg = tc.bg || {};
+  if (bg.mode === 'montage' && project._montage) {
+    ctx.drawImage(project._montage, 0, 0, cw, ch);
+  } else {
+    ctx.fillStyle = bg.color || '#0d0d10';
+    ctx.fillRect(0, 0, cw, ch);
+  }
+  const lines = (tc.lines || []).filter((l) => l && (l.text || '').trim().length);
+  if (!lines.length) return;
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const spacing = tc.lineSpacing ?? 1.3;
+  const sized = lines.map((l) => ({
+    text: l.text,
+    font: l.font || 'Playfair Display',
+    size: (l.sizePct ?? 7) / 100 * ch,
+  }));
+  const slotHeights = sized.map((s) => s.size * spacing);
+  const totalH = slotHeights.reduce((a, b) => a + b, 0);
+  let y = ch / 2 - totalH / 2;
+
+  ctx.fillStyle = tc.textColor || '#f2ece0';
+  ctx.shadowColor = 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur = ch * 0.008;
+  for (let i = 0; i < sized.length; i++) {
+    y += slotHeights[i] / 2;
+    ctx.font = `${Math.round(sized[i].size)}px "${sized[i].font}", serif`;
+    ctx.fillText(sized[i].text, cw / 2, y);
+    y += slotHeights[i] / 2;
+  }
+  ctx.shadowBlur = 0;
+}
+
+// Exposed for the settings-panel live preview of the title card.
+export function renderTitleCard(ctx, project, cw, ch) {
+  ctx.clearRect(0, 0, cw, ch);
+  drawTitle(ctx, project, cw, ch);
+}
+
 function drawSlideLayer(layerCtx, project, item, asset, localU, cw, ch) {
   layerCtx.clearRect(0, 0, cw, ch);
   layerCtx.fillStyle = '#000000';
   layerCtx.fillRect(0, 0, cw, ch);
+  if (item.type === 'title') { drawTitle(layerCtx, project, cw, ch); return; }
   drawBackground(layerCtx, project, asset, cw, ch); // background fills the canvas
   if (asset && asset.img) {
     // Frame is per-slide: 'original' shape uses this photo's aspect ratio.

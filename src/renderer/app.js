@@ -1,6 +1,6 @@
 // app.js — UI state and wiring. Holds the project model, prepares assets,
 // drives the preview Player, and runs exports.
-import { buildTimeline, featuredAt, getSourceRect, computeFrame } from './render.js';
+import { buildTimeline, featuredAt, getSourceRect, computeFrame, renderTitleCard } from './render.js';
 import { loadImage, makeSlideBackground, makeMontage } from './assets.js';
 import { Player } from './preview.js';
 import { exportVideo } from './exporter.js';
@@ -9,6 +9,8 @@ import { detectFaces, faceApiAvailable } from './faces.js';
 // --- State -----------------------------------------------------------------
 let uidCounter = 1;
 const uid = () => 's' + (uidCounter++);
+
+const TITLE_FONTS = ['Playfair Display', 'Cormorant Garamond', 'EB Garamond', 'Cinzel', 'Libre Baskerville', 'Lora', 'Great Vibes', 'Tangerine'];
 
 const project = {
   canvas: { w: 1280, h: 720 },
@@ -22,6 +24,14 @@ const project = {
   timing: { mode: 'per-photo', totalSec: 60, _autoDur: 7 }, // 'total' fits a fixed length / music
   audio: { src: null, name: null, durationSec: 0 },
   fade: { inSec: 0, outSec: 0, endMode: 'fadeout' }, // fades apply when loop is off
+  titleCard: {
+    atStart: false, atEnd: false, durationSec: 5, lineSpacing: 1.3,
+    textColor: '#f2ece0', bg: { mode: 'color', color: '#0d0d10' },
+    lines: [
+      { text: '', font: 'Cinzel', sizePct: 9 },
+      { text: '', font: 'Cormorant Garamond', sizePct: 5 },
+    ],
+  },
   defaults: {
     durationSec: 7,
     transitionSec: 1,
@@ -65,16 +75,21 @@ function getState() {
 function applyTiming() {
   const t = project.timing;
   if (t.mode !== 'total') return;
-  const n = project.slides.length;
-  if (!n) { t._autoDur = project.defaults.durationSec; return; }
+  const unlocked = project.slides.filter((s) => s.durationSec == null).length;
+  if (!project.slides.length || unlocked === 0) { t._autoDur = project.defaults.durationSec; return; }
   const target = project.audio.src ? project.audio.durationSec : t.totalSec;
-  let transSum = 0;
-  for (let i = 0; i < n - 1; i++) transSum += (project.slides[i].transitionSec ?? project.defaults.transitionSec);
-  const requiredDurSum = Math.max(0, target) + transSum; // total playtime + overlaps
-  let lockedSum = 0, unlocked = 0;
-  for (const s of project.slides) { if (s.durationSec != null) lockedSum += s.durationSec; else unlocked++; }
-  t._autoDur = unlocked === 0 ? project.defaults.durationSec
-    : Math.max(0.5, (requiredDurSum - lockedSum) / unlocked);
+  if (!(target > 0)) return;
+  if (!(t._autoDur > 0)) t._autoDur = project.defaults.durationSec;
+  // Adjust the per-photo auto duration until the whole timeline (photos + any
+  // title cards + crossfades) matches the target length. totalDuration is
+  // linear in _autoDur, so this converges in one step (extra iters cover the
+  // transition-vs-duration guard clamps).
+  for (let iter = 0; iter < 10; iter++) {
+    const tl = buildTimeline(project);
+    const diff = target - tl.totalDuration;
+    if (Math.abs(diff) < 0.03) break;
+    t._autoDur = Math.max(0.4, t._autoDur + diff / unlocked);
+  }
 }
 
 function rebuild() {
@@ -85,6 +100,7 @@ function rebuild() {
   updateTimeUI(player.time, timeline.totalDuration);
   updateCount();
   updateAutoDurHint();
+  updateTitlePreview();
 }
 
 const player = new Player(canvasEl, getState, (t, dur) => {
@@ -99,7 +115,8 @@ const player = new Player(canvasEl, getState, (t, dur) => {
 // even at 60 fps.
 function updateNowPlaying(t) {
   const f = (timeline && timeline.items.length) ? featuredAt(timeline, t) : null;
-  setNowPlaying(f ? project.slides[f.item.index].id : null);
+  const slide = f ? project.slides[f.item.index] : null; // title cards have index -1
+  setNowPlaying(slide ? slide.id : null);
 }
 function setNowPlaying(id) {
   if (id === currentPlayingId) return;
@@ -528,6 +545,78 @@ function syncAudioPlayState() {
   }
 }
 
+// --- Title card ------------------------------------------------------------
+const tc = () => project.titleCard;
+
+function renderTitleLines() {
+  const box = $('titleLines');
+  box.innerHTML = '';
+  tc().lines.forEach((ln, idx) => {
+    const row = document.createElement('div');
+    row.className = 'title-line';
+    row.dataset.idx = idx;
+    const opts = TITLE_FONTS.map((f) => `<option value="${f}"${f === ln.font ? ' selected' : ''}>${f}</option>`).join('');
+    row.innerHTML = `
+      <input type="text" class="tl-text" placeholder="Line text" value="${(ln.text || '').replace(/"/g, '&quot;')}" />
+      <div class="tl-controls">
+        <select class="tl-font">${opts}</select>
+        <input type="range" class="tl-size" min="2" max="20" step="0.5" value="${ln.sizePct}" title="Size" />
+        <button class="tl-remove btn tiny ghost" title="Remove line">✕</button>
+      </div>`;
+    row.querySelector('.tl-text').addEventListener('input', (e) => { ln.text = e.target.value; onTitleChange(); });
+    row.querySelector('.tl-font').addEventListener('change', (e) => { ln.font = e.target.value; onTitleChange(); });
+    row.querySelector('.tl-size').addEventListener('input', (e) => { ln.sizePct = parseFloat(e.target.value); onTitleChange(); });
+    row.querySelector('.tl-remove').addEventListener('click', () => {
+      tc().lines.splice(idx, 1);
+      renderTitleLines(); onTitleChange();
+    });
+    box.appendChild(row);
+  });
+  $('btnAddTitleLine').classList.toggle('hidden', tc().lines.length >= 4);
+}
+
+function updateTitlePreview() {
+  const cv = $('titlePreview');
+  if (!cv) return;
+  renderTitleCard(cv.getContext('2d'), project, cv.width, cv.height);
+}
+
+// A title change affects the timeline only if a card is actually shown.
+function onTitleChange() {
+  updateTitlePreview();
+  if (tc().atStart || tc().atEnd) rebuild(); else player.redraw();
+}
+
+$('btnAddTitleLine').addEventListener('click', () => {
+  if (tc().lines.length >= 4) return;
+  tc().lines.push({ text: '', font: 'Lora', sizePct: 5 });
+  renderTitleLines(); updateTitlePreview();
+});
+$('titleAtStart').addEventListener('change', (e) => { tc().atStart = e.target.checked; rebuild(); });
+$('titleAtEnd').addEventListener('change', (e) => { tc().atEnd = e.target.checked; rebuild(); });
+$('titleDur').addEventListener('input', (e) => { tc().durationSec = parseFloat(e.target.value); $('titleDurVal').textContent = e.target.value; onTitleChange(); });
+$('titleSpacing').addEventListener('input', (e) => { tc().lineSpacing = parseFloat(e.target.value); $('titleSpacingVal').textContent = e.target.value; onTitleChange(); });
+$('titleTextColor').addEventListener('input', (e) => { tc().textColor = e.target.value; onTitleChange(); });
+$('titleBgMode').addEventListener('change', (e) => {
+  tc().bg.mode = e.target.value;
+  $('titleBgColorField').classList.toggle('hidden', e.target.value !== 'color');
+  onTitleChange();
+});
+$('titleBgColor').addEventListener('input', (e) => { tc().bg.color = e.target.value; onTitleChange(); });
+
+function syncTitleControls() {
+  $('titleAtStart').checked = tc().atStart;
+  $('titleAtEnd').checked = tc().atEnd;
+  $('titleDur').value = tc().durationSec; $('titleDurVal').textContent = tc().durationSec;
+  $('titleSpacing').value = tc().lineSpacing; $('titleSpacingVal').textContent = tc().lineSpacing;
+  $('titleTextColor').value = tc().textColor;
+  $('titleBgMode').value = tc().bg.mode;
+  $('titleBgColorField').classList.toggle('hidden', tc().bg.mode !== 'color');
+  $('titleBgColor').value = tc().bg.color;
+  renderTitleLines();
+  updateTitlePreview();
+}
+
 // --- Transport -------------------------------------------------------------
 function fmtTime(sec) {
   sec = Math.max(0, sec || 0);
@@ -602,6 +691,7 @@ async function runExport() {
   $('progressFill').style.width = '0%';
   $('progressLabel').textContent = 'Rendering frames…';
 
+  try { await document.fonts.ready; } catch {} // ensure title fonts are rendered, not fallback
   const exportTimeline = buildTimeline(project); // fresh, current settings
   try {
     const res = await exportVideo(project, exportTimeline, assetsArray(), {
@@ -659,6 +749,7 @@ function serializeProject() {
       timing: { mode: project.timing.mode, totalSec: project.timing.totalSec },
       audio: { src: project.audio.src, name: project.audio.name, durationSec: project.audio.durationSec },
       fade: { inSec: project.fade.inSec, outSec: project.fade.outSec, endMode: project.fade.endMode },
+      titleCard: JSON.parse(JSON.stringify(project.titleCard)),
       defaults: {
         durationSec: project.defaults.durationSec,
         transitionSec: project.defaults.transitionSec,
@@ -755,6 +846,18 @@ async function loadProjectDoc(read, filePath) {
     : { src: null, name: null, durationSec: 0 };
   const pa = $('previewAudio');
   if (project.audio.src) pa.src = srcToUrl(project.audio.src); else pa.removeAttribute('src');
+  if (p.titleCard) {
+    project.titleCard = {
+      atStart: !!p.titleCard.atStart, atEnd: !!p.titleCard.atEnd,
+      durationSec: p.titleCard.durationSec ?? 5,
+      lineSpacing: p.titleCard.lineSpacing ?? 1.3,
+      textColor: p.titleCard.textColor || '#f2ece0',
+      bg: { mode: (p.titleCard.bg && p.titleCard.bg.mode) || 'color', color: (p.titleCard.bg && p.titleCard.bg.color) || '#0d0d10' },
+      lines: Array.isArray(p.titleCard.lines) && p.titleCard.lines.length
+        ? p.titleCard.lines.map((l) => ({ text: l.text || '', font: l.font || 'Lora', sizePct: l.sizePct ?? 6 }))
+        : project.titleCard.lines,
+    };
+  }
   if (p.defaults) {
     project.defaults.durationSec = p.defaults.durationSec ?? 7;
     project.defaults.transitionSec = p.defaults.transitionSec ?? 1;
@@ -839,6 +942,7 @@ function syncControlsFromProject() {
   $('fadeOut').value = project.fade.outSec; $('fadeOutVal').textContent = project.fade.outSec;
   $('endMode').value = project.fade.endMode;
   updateTimingUI();
+  syncTitleControls();
 }
 
 // Relink missing photos by pointing at the folder they now live in.
@@ -929,4 +1033,9 @@ player.resizeToProject();
 player.seek(0);
 updateCount();
 updateTimingUI();
+syncTitleControls();
+// Preload the title fonts so the canvas uses them (not a fallback), then redraw.
+Promise.all(TITLE_FONTS.map((f) => document.fonts.load(`32px "${f}"`)))
+  .then(() => { updateTitlePreview(); player.redraw(); })
+  .catch(() => {});
 if (!faceApiAvailable()) $('faceScanStatus').textContent = 'Face AI not loaded.';

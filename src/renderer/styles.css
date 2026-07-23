@@ -1,3 +1,13 @@
+/* Bundled title fonts (SIL Open Font License 1.1 — see vendor/fonts/OFL.txt) */
+@font-face { font-family: 'Playfair Display'; src: url('vendor/fonts/playfairdisplay.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('vendor/fonts/cormorantgaramond.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'EB Garamond'; src: url('vendor/fonts/ebgaramond.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'Cinzel'; src: url('vendor/fonts/cinzel.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'Libre Baskerville'; src: url('vendor/fonts/librebaskerville.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'Lora'; src: url('vendor/fonts/lora.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'Great Vibes'; src: url('vendor/fonts/greatvibes.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'Tangerine'; src: url('vendor/fonts/tangerine.woff2') format('woff2'); font-display: swap; }
+
 :root {
   --bg: #15171c;
   --panel: #1c1f27;
@@ -190,6 +200,15 @@ select { cursor: pointer; }
 .bar { height: 8px; background: var(--panel-2); border-radius: 6px; overflow: hidden; }
 .bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #a97bff); transition: width .1s linear; }
 .progress-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+
+/* Title card lines */
+.title-line { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+.title-line .tl-text { grid-column: 1 / -1; }
+.title-line .tl-controls { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; }
+.title-line .tl-font { flex: 1; }
+.title-line .tl-size { width: 90px; }
+.title-line .tl-remove { flex: none; }
+.title-preview { width: 100%; background: #000; border-radius: 6px; margin-top: 8px; display: block; }
 
 /* Music chip */
 .music-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin-bottom: 12px; }
