@@ -453,6 +453,25 @@ $('licRequest').addEventListener('click', () => {
 });
 $('demoChip').addEventListener('click', () => setActiveTab('license'));
 
+// --- Update check (notify only) --------------------------------------------
+let updateTimer = null;
+async function tryUpdateCheck() {
+  try {
+    const r = await window.api.updateCheck();
+    if (r && r.ok && r.updateAvailable) showUpdateModal(r);
+  } catch { /* silent — offline / isolated network is normal */ }
+}
+function showUpdateModal(r) {
+  $('updateMsg').textContent = 'Version ' + r.latest + ' is available — you have ' + r.current + '.';
+  const m = $('updateModal');
+  m.classList.remove('hidden');
+  $('btnUpdateDownload').onclick = () => { window.api.openExternal(r.url); m.classList.add('hidden'); clearTimeout(updateTimer); };
+  $('btnUpdateLater').onclick = () => { m.classList.add('hidden'); clearTimeout(updateTimer); };
+  // Never leave a dialog open on an unattended machine.
+  clearTimeout(updateTimer);
+  updateTimer = setTimeout(() => m.classList.add('hidden'), 60000);
+}
+
 // Draw the selected photo with its detected face boxes in the side panel.
 function refreshSelectedFacePanel() {
   const s = project.slides.find((x) => x.id === selectedId);
@@ -1177,7 +1196,7 @@ window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'O')) {
     e.preventDefault(); openProject(); return;
   }
-  if (e.key === 'Escape') { $('saveModal').classList.add('hidden'); $('relinkModal').classList.add('hidden'); $('aboutModal').classList.add('hidden'); return; }
+  if (e.key === 'Escape') { $('saveModal').classList.add('hidden'); $('relinkModal').classList.add('hidden'); $('aboutModal').classList.add('hidden'); $('updateModal').classList.add('hidden'); return; }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Space') { e.preventDefault(); player.toggle(); syncAudioPlayState(); updateTimeUI(player.time, timeline.totalDuration); }
   if (e.code === 'Delete' && selectedId) removeSlide(selectedId);
@@ -1220,3 +1239,4 @@ Promise.all(TITLE_FONTS.map((f) => document.fonts.load(`32px "${f}"`)))
   .catch(() => {});
 if (!faceApiAvailable()) $('faceScanStatus').textContent = 'Face AI not loaded.';
 initLicense();
+tryUpdateCheck();

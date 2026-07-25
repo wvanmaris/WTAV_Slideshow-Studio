@@ -102,6 +102,55 @@ ipcMain.handle('license:deactivate', async (_e, { key } = {}) => {
   return { ok: false, status: r.json.reason || 'refused' };
 });
 
+// --- Update check (notify only) --------------------------------------------
+// Start-up only, non-blocking, silent on any failure — a machine on an isolated
+// network simply never sees a prompt. Compares the latest published release to
+// the running version; the renderer shows a "download / later" popup.
+const UPDATE_CHECK_URL = 'https://api.github.com/repos/wvanmaris/WTAV_Slideshow-Studio/releases/latest';
+const UPDATE_DOWNLOAD_URL = 'https://github.com/wvanmaris/WTAV_Slideshow-Studio/releases/latest';
+
+function httpsGetJson(url, timeoutMs) {
+  return new Promise((resolve) => {
+    let u; try { u = new URL(url); } catch (e) { return resolve({ ok: false, error: 'bad-url' }); }
+    const req = https.request({
+      host: u.hostname, port: u.port || 443, path: u.pathname + u.search, method: 'GET',
+      timeout: Number(timeoutMs) || 8000,
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        // GitHub's API 403s a request with no User-Agent.
+        'User-Agent': 'WTAV-Slideshow-Studio/' + app.getVersion(),
+      },
+    }, (res) => {
+      let body = ''; res.setEncoding('utf8');
+      res.on('data', (c) => { if (body.length < 200000) body += c; });
+      res.on('end', () => {
+        let json = null; try { json = JSON.parse(body); } catch (e) { /* not JSON */ }
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300 && !!json, status: res.statusCode, json });
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }); });
+    req.on('error', (e) => resolve({ ok: false, error: e.message }));
+    req.end();
+  });
+}
+
+// Numeric dotted-version compare: 0.3.10 > 0.3.9 (a string compare would not).
+function compareVersions(a, b) {
+  const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d < 0 ? -1 : 1; }
+  return 0;
+}
+
+ipcMain.handle('update:check', async () => {
+  const current = app.getVersion();
+  const r = await httpsGetJson(UPDATE_CHECK_URL, 8000);
+  if (!r.ok || !r.json || !r.json.tag_name) return { ok: false, current };
+  const latest = String(r.json.tag_name).replace(/^v/i, '');
+  return { ok: true, current, latest, updateAvailable: compareVersions(latest, current) > 0, url: UPDATE_DOWNLOAD_URL };
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1360,

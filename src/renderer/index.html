@@ -437,6 +437,18 @@
     </div>
   </div>
 
+  <!-- Update available -->
+  <div id="updateModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Update available</h3>
+      <p class="hint" id="updateMsg"></p>
+      <div class="modal-actions">
+        <button id="btnUpdateLater" class="btn ghost">Later</button>
+        <button id="btnUpdateDownload" class="btn primary">Download…</button>
+      </div>
+    </div>
+  </div>
+
   <!-- face-api.js (bundles its own TensorFlow.js). Classic script exposes the
        global window.faceapi; runs before the app module. Fully offline. -->
   <script src="vendor/face-api.js"></script>

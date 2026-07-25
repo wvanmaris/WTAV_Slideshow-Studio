@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   licenseActivate: (key) => ipcRenderer.invoke('license:activate', { key }),
   licenseDeactivate: (key) => ipcRenderer.invoke('license:deactivate', { key }),
   licenseRenew: (key) => ipcRenderer.invoke('license:renew', { key }),
+  updateCheck: () => ipcRenderer.invoke('update:check'),
   openImages: () => ipcRenderer.invoke('dialog:openImages'),
   openAudio: () => ipcRenderer.invoke('dialog:openAudio'),
   saveVideo: (format) => ipcRenderer.invoke('dialog:saveVideo', { format }),
