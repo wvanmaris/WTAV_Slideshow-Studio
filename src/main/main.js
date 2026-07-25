@@ -16,6 +16,92 @@ const isDev = process.argv.includes('--dev');
 let mainWindow = null;
 const jobs = new Map(); // id -> { proc, stdin, stderr }
 
+// --- Licensing (shared WTAV model — see the private wtav-licensing repo) -----
+// Offline signed keys: the app verifies against compiled-in PUBLIC keys and
+// needs no server to run. The activation/renewal endpoints are optional, run
+// once at start-up, never block, and a failure NEVER disables the app.
+const { verifyLicense, daysLeft } = require('./license');
+const machineIdent = require('./fingerprint.js');
+const https = require('https');
+
+const LICENSE_PRODUCT = 'wss'; // WTAV Slideshow Studio — a 'wdc' key won't unlock this
+const LICENSE_PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAN/j0uauM07be1kBTDuJPzmb9IazgRfbzOPBWBTaBfBw=\n-----END PUBLIC KEY-----\n";
+const LICENSE_RENEWAL_PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgD//YNA9acrRSCCKvVYIlOb3e8M8KozfgOk9rgdnmqg=\n-----END PUBLIC KEY-----\n";
+const LICENSE_KEYS = [LICENSE_PUBLIC_KEY, LICENSE_RENEWAL_PUBLIC_KEY];
+const LICENSE_GRACE_DAYS = 5;
+const LICENSE_RENEW_WITHIN_DAYS = 10;
+const APP_MAJOR = (() => { try { return parseInt(app.getVersion().split('.')[0], 10) || 0; } catch (e) { return 0; } })();
+const LICENSE_RENEW_URL = 'https://www.avtrade.nl/wtav/renew.php';
+const LICENSE_ACTIVATE_URL = 'https://www.avtrade.nl/wtav/activate.php';
+let MACHINE_FP = null;
+function machineFp() { if (!MACHINE_FP) MACHINE_FP = machineIdent.fingerprint(LICENSE_PRODUCT); return MACHINE_FP; }
+
+function httpsPostJson(url, payload, timeoutMs) {
+  return new Promise((resolve) => {
+    let u; try { u = new URL(url); } catch (e) { return resolve({ ok: false, error: 'bad-url' }); }
+    const data = Buffer.from(JSON.stringify(payload), 'utf8');
+    const req = https.request({
+      host: u.hostname, port: u.port || 443, path: u.pathname + u.search, method: 'POST',
+      timeout: Number(timeoutMs) || 10000,
+      headers: {
+        'Content-Type': 'application/json', 'Content-Length': data.length, 'Accept': 'application/json',
+        // User-Agent is NOT optional — Imunify360 on the host blocks UA-less requests.
+        'User-Agent': 'WTAV-Slideshow-Studio/' + app.getVersion(),
+      },
+    }, (res) => {
+      let body = ''; res.setEncoding('utf8');
+      res.on('data', (c) => { if (body.length < 20000) body += c; });
+      res.on('end', () => {
+        let json = null; try { json = JSON.parse(body); } catch (e) { /* HTML error page */ }
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300 && !!json, status: res.statusCode, json });
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }); });
+    req.on('error', (e) => resolve({ ok: false, error: e.message }));
+    req.write(data); req.end();
+  });
+}
+
+ipcMain.handle('license:verify', async (_e, { key } = {}) => {
+  const r = verifyLicense(LICENSE_KEYS, key, { graceDays: LICENSE_GRACE_DAYS, product: LICENSE_PRODUCT, appMajor: APP_MAJOR });
+  return {
+    ok: !!r.ok, reason: r.reason,
+    email: r.payload ? r.payload.e : '', type: r.payload ? r.payload.t : '',
+    expiresAt: r.expiresAt || 0, daysLeft: r.payload ? daysLeft(r.payload) : null, signedBy: r.signedBy || '',
+  };
+});
+ipcMain.handle('license:renew', async (_e, { key } = {}) => {
+  const current = verifyLicense(LICENSE_KEYS, key, { graceDays: LICENSE_GRACE_DAYS, product: LICENSE_PRODUCT, appMajor: APP_MAJOR });
+  if (!current.ok || !current.payload) return { renewed: false, reason: 'not-licensed' };
+  if (!current.payload.x) return { renewed: false, reason: 'perpetual' };
+  const left = daysLeft(current.payload);
+  if (left != null && left > LICENSE_RENEW_WITHIN_DAYS) return { renewed: false, reason: 'not-due', daysLeft: left };
+  const r = await httpsPostJson(LICENSE_RENEW_URL, { key }, 10000);
+  if (!r.ok || !r.json || r.json.ok !== true || !r.json.key) return { renewed: false, reason: 'unreachable' };
+  const fresh = verifyLicense(LICENSE_KEYS, r.json.key, { graceDays: 0, product: LICENSE_PRODUCT, appMajor: APP_MAJOR });
+  if (!fresh.ok || !fresh.payload) return { renewed: false, reason: 'bad-reply' };
+  if (fresh.payload.e !== current.payload.e) return { renewed: false, reason: 'wrong-identity' };
+  if (fresh.payload.x && current.payload.x && fresh.payload.x <= current.payload.x) return { renewed: false, reason: 'no-extension' };
+  return { renewed: true, key: r.json.key, daysLeft: daysLeft(fresh.payload), email: fresh.payload.e };
+});
+ipcMain.handle('license:activate', async (_e, { key } = {}) => {
+  const cur = verifyLicense(LICENSE_KEYS, key, { graceDays: LICENSE_GRACE_DAYS, product: LICENSE_PRODUCT, appMajor: APP_MAJOR });
+  if (!cur.ok) return { ok: false, status: 'not-licensed' };
+  const r = await httpsPostJson(LICENSE_ACTIVATE_URL, { key, fingerprint: machineFp() }, 10000);
+  if (!r.json) return { ok: false, status: 'unreachable' };
+  if (r.json.ok) return { ok: true, status: r.json.status };
+  if (r.json.reason === 'seat-limit') return { ok: false, status: 'seat-limit' };
+  return { ok: false, status: r.json.reason || 'refused' };
+});
+ipcMain.handle('license:deactivate', async (_e, { key } = {}) => {
+  const cur = verifyLicense(LICENSE_KEYS, key, { graceDays: LICENSE_GRACE_DAYS, product: LICENSE_PRODUCT, appMajor: APP_MAJOR });
+  if (!cur.ok) return { ok: false, status: 'not-licensed' };
+  const r = await httpsPostJson(LICENSE_ACTIVATE_URL, { action: 'deactivate', key, fingerprint: machineFp() }, 10000);
+  if (!r.json) return { ok: false, status: 'unreachable' };
+  if (r.json.ok) return { ok: true, status: r.json.status };
+  return { ok: false, status: r.json.reason || 'refused' };
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1360,

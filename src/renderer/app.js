@@ -147,6 +147,14 @@ function toast(msg, isErr = false) {
 // --- Photos ----------------------------------------------------------------
 async function addSources(sources) {
   if (!sources.length) return;
+  if (!isLicensed()) {
+    const room = Math.max(0, DEMO.maxPhotos - project.slides.length);
+    if (sources.length > room) {
+      sources = sources.slice(0, room);
+      toast('Demo mode: up to ' + DEMO.maxPhotos + ' photos. A free licence lifts this.', true);
+    }
+    if (!sources.length) return;
+  }
   const added = [];
   for (const src of sources) {
     try {
@@ -348,6 +356,102 @@ $('btnFeedback').addEventListener('click', async () => {
   let v = '—'; try { v = await window.api.getVersion(); } catch {}
   window.api.openExternal('mailto:wtavpost@gmail.com?subject=' + encodeURIComponent('WTAV Slideshow Studio feedback (v' + v + ')'));
 });
+
+// --- Licence + demo mode ---------------------------------------------------
+// A valid signed key licences the app OFFLINE. Activation/renewal are optional,
+// run once at start-up, never block, and never disable the app. Unlicensed = a
+// generous demo with a few limits.
+const DEMO = { maxPhotos: 40, maxTimelineSec: 150, maxExportsPer48h: 2 };
+let license = { status: 'demo', email: '', type: '', daysLeft: null, expiresAt: 0 };
+function isLicensed() { return license.status === 'licensed' || license.status === 'grace'; }
+
+function exportHistory() { try { return JSON.parse(localStorage.getItem('wss.exports') || '[]'); } catch { return []; } }
+function exportsInWindow() { const cut = Date.now() - 48 * 3600 * 1000; return exportHistory().filter((t) => t > cut).length; }
+function recordDemoExport() { const h = exportHistory().filter((t) => t > Date.now() - 48 * 3600 * 1000); h.push(Date.now()); localStorage.setItem('wss.exports', JSON.stringify(h)); }
+
+function updateLicenseUI() {
+  const licensed = isLicensed();
+  $('demoChip').classList.toggle('hidden', licensed);
+  $('licMachineRow').classList.toggle('hidden', !licensed);
+  const st = $('licStatus'), note = $('licDemoNote');
+  if (licensed) {
+    let msg = 'Licensed to ' + (license.email || '—') + (license.type ? ' · ' + license.type : '');
+    if (license.expiresAt) {
+      const d = new Date(license.expiresAt).toLocaleDateString();
+      msg += license.status === 'grace' ? ' · past its date — open online to renew' : ' · renews automatically (valid to ' + d + ')';
+    } else msg += ' · perpetual';
+    st.textContent = '✓ ' + msg; st.className = 'hint small lic-ok';
+    note.classList.add('hidden');
+  } else {
+    st.textContent = 'Demo mode — a free licence removes the limits below.'; st.className = 'hint small';
+    note.classList.remove('hidden');
+    note.innerHTML = 'Demo limits:<br>• Up to ' + DEMO.maxPhotos + ' photos<br>• WebM export only (MP4 / H.264 needs a licence)<br>• Timeline up to ' + (DEMO.maxTimelineSec / 60) + ' minutes<br>• Up to ' + DEMO.maxExportsPer48h + ' exports per 2 days';
+  }
+  // MP4 export is a licensed feature.
+  const sel = $('exportFormat');
+  const mp4 = sel && [...sel.options].find((o) => o.value === 'mp4');
+  if (mp4) {
+    mp4.disabled = !licensed;
+    mp4.textContent = 'MP4 · H.264' + (licensed ? ' (most compatible)' : ' — licence needed');
+    if (!licensed && sel.value === 'mp4') sel.value = 'webm';
+  }
+}
+
+async function refreshLicense(key) {
+  if (!key) { license = { status: 'demo', email: '', type: '', daysLeft: null, expiresAt: 0 }; updateLicenseUI(); return; }
+  try {
+    const r = await window.api.licenseVerify(key);
+    license = r.ok
+      ? { status: r.reason === 'grace' ? 'grace' : 'licensed', email: r.email, type: r.type, daysLeft: r.daysLeft, expiresAt: r.expiresAt }
+      : { status: 'demo', email: '', type: '', daysLeft: null, expiresAt: 0, reason: r.reason };
+  } catch { license = { status: 'demo' }; }
+  updateLicenseUI();
+}
+
+function saveKey(key) { localStorage.setItem('wss.license', key); $('licKey').value = key; }
+
+async function initLicense() {
+  const key = localStorage.getItem('wss.license') || '';
+  $('licKey').value = key;
+  await refreshLicense(key);
+  // Start-up only, non-blocking, silent: register the seat + try a renewal.
+  if (key && isLicensed()) {
+    window.api.licenseActivate(key).catch(() => {});
+    window.api.licenseRenew(key).then((r) => {
+      if (r && r.renewed && r.key) { saveKey(r.key); refreshLicense(r.key); $('licRenewNote').textContent = 'Renewed automatically just now.'; }
+    }).catch(() => {});
+  }
+}
+
+$('licActivate').addEventListener('click', async () => {
+  const key = $('licKey').value.trim();
+  if (!key) { toast('Paste a licence key first.', true); return; }
+  const r = await window.api.licenseVerify(key);
+  if (!r.ok) { toast('That key is not valid (' + (r.reason || 'unknown') + ').', true); return; }
+  saveKey(key);
+  await refreshLicense(key);
+  window.api.licenseActivate(key).then((a) => {
+    if (a && a.status === 'seat-limit') toast('Licence active. Please run it on one machine at a time.');
+  }).catch(() => {});
+  toast('Licence activated — thank you!');
+});
+$('licRemove').addEventListener('click', async () => {
+  const key = $('licKey').value.trim();
+  if (key) window.api.licenseDeactivate(key).catch(() => {}); // free the seat, best-effort
+  localStorage.removeItem('wss.license');
+  $('licKey').value = '';
+  await refreshLicense('');
+  toast('Licence removed.');
+});
+$('licDeactivate').addEventListener('click', async () => {
+  const key = $('licKey').value.trim(); if (!key) return;
+  const r = await window.api.licenseDeactivate(key);
+  toast(r && r.ok ? 'This machine deactivated — you can activate it on another computer.' : 'Could not reach the licence server.', !(r && r.ok));
+});
+$('licRequest').addEventListener('click', () => {
+  window.api.openExternal('mailto:wtavpost@gmail.com?subject=' + encodeURIComponent('WTAV Slideshow Studio — free licence request'));
+});
+$('demoChip').addEventListener('click', () => setActiveTab('license'));
 
 // Draw the selected photo with its detected face boxes in the side panel.
 function refreshSelectedFacePanel() {
@@ -723,6 +827,11 @@ async function runExport() {
   if (exporting) return;
   if (!project.slides.length) { toast('Add some photos first.', true); return; }
   const format = $('exportFormat').value;
+  if (!isLicensed()) {
+    if (format === 'mp4') { toast('Demo exports WebM only — MP4 (H.264) needs a licence.', true); setActiveTab('license'); return; }
+    if (timeline.totalDuration > DEMO.maxTimelineSec) { toast('Demo: the show is longer than ' + (DEMO.maxTimelineSec / 60) + ' minutes. Shorten it or get a licence.', true); return; }
+    if (exportsInWindow() >= DEMO.maxExportsPer48h) { toast('Demo: up to ' + DEMO.maxExportsPer48h + ' exports per 2 days. A free licence removes this.', true); setActiveTab('license'); return; }
+  }
   const qualityKey = $('exportQuality').value;
   const outputPath = await window.api.saveVideo(format);
   if (!outputPath) return;
@@ -754,6 +863,7 @@ async function runExport() {
     if (res.canceled) {
       toast('Export cancelled.');
     } else if (res.ok) {
+      if (!isLicensed()) recordDemoExport();
       $('progressFill').style.width = '100%';
       toast('Saved: ' + outputPath);
     } else {
@@ -1109,3 +1219,4 @@ Promise.all(TITLE_FONTS.map((f) => document.fonts.load(`32px "${f}"`)))
   .then(() => { updateTitlePreview(); player.redraw(); })
   .catch(() => {});
 if (!faceApiAvailable()) $('faceScanStatus').textContent = 'Face AI not loaded.';
+initLicense();

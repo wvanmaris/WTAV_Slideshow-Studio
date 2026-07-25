@@ -19,6 +19,7 @@
     <div class="topbar-actions">
       <button id="btnAddPhotos" class="btn primary">+ Add photos</button>
       <span id="countLabel" class="muted"></span>
+      <button id="demoChip" class="demo-chip hidden" title="Unlicensed — click for licence options">Demo</button>
       <button id="btnAbout" class="btn tiny ghost" title="About">About</button>
     </div>
   </header>
@@ -58,6 +59,7 @@
         <button class="tab" data-tab="style">Style</button>
         <button class="tab" data-tab="timing">Timing</button>
         <button class="tab" data-tab="export">Export</button>
+        <button class="tab" data-tab="license">Licence</button>
       </div>
 
       <p id="noPhotoHint" class="hint" data-tab="photo" style="padding:14px 16px 0;">Select a photo in the list to edit its duration, motion and face options.</p>
@@ -362,6 +364,28 @@
             <span id="progressLabel" class="muted small">Preparing…</span>
             <button id="btnCancelExport" class="btn tiny ghost">Cancel</button>
           </div>
+        </div>
+      </section>
+
+      <!-- Licence -->
+      <section class="settings-group" data-tab="license">
+        <h2>Licence</h2>
+        <p class="hint small" id="licStatus">Checking licence…</p>
+        <div id="licDemoNote" class="demo-note hidden"></div>
+        <label class="field">
+          <span>Licence key</span>
+          <textarea id="licKey" rows="3" placeholder="Paste your WTAV-… key here" spellcheck="false"></textarea>
+        </label>
+        <div class="field-row">
+          <button id="licActivate" class="btn primary">Activate</button>
+          <button id="licRemove" class="btn ghost">Remove</button>
+        </div>
+        <button id="licRequest" class="btn ghost full">Request a free licence…</button>
+        <p id="licRenewNote" class="hint small"></p>
+        <div id="licMachineRow" class="hidden">
+          <hr />
+          <button id="licDeactivate" class="btn ghost full">Deactivate this machine</button>
+          <p class="hint small">Only needed to move your licence to another computer.</p>
         </div>
       </section>
     </aside>

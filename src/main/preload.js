@@ -4,6 +4,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   getVersion: () => ipcRenderer.invoke('app:version'),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', { url }),
+  licenseVerify: (key) => ipcRenderer.invoke('license:verify', { key }),
+  licenseActivate: (key) => ipcRenderer.invoke('license:activate', { key }),
+  licenseDeactivate: (key) => ipcRenderer.invoke('license:deactivate', { key }),
+  licenseRenew: (key) => ipcRenderer.invoke('license:renew', { key }),
   openImages: () => ipcRenderer.invoke('dialog:openImages'),
   openAudio: () => ipcRenderer.invoke('dialog:openAudio'),
   saveVideo: (format) => ipcRenderer.invoke('dialog:saveVideo', { format }),
