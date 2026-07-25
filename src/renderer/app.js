@@ -449,7 +449,7 @@ $('licDeactivate').addEventListener('click', async () => {
   toast(r && r.ok ? 'This machine deactivated — you can activate it on another computer.' : 'Could not reach the licence server.', !(r && r.ok));
 });
 $('licRequest').addEventListener('click', () => {
-  window.api.openExternal('mailto:wtavpost@gmail.com?subject=' + encodeURIComponent('WTAV Slideshow Studio — free licence request'));
+  window.api.openExternal('mailto:License@avtrade.nl?subject=' + encodeURIComponent('License Slideshow Studio'));
 });
 $('demoChip').addEventListener('click', () => setActiveTab('license'));
 
