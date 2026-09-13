@@ -13,6 +13,10 @@ It handles the tedious part automatically:
   photos** — so there are never black bars.
 - **Ken Burns motion.** Slow, tasteful zoom/pan on every image (per-photo control).
 - **Crossfades.** 1-second (adjustable) dissolves between photos.
+- **Multi-photo modes.** *Collage* shows 2–7 photos side by side on a wide
+  canvas, swapping one at a time or all together with adjustable interval and
+  randomness; *Photo wall* keeps pasting photos on top of each other until the
+  wall is full (starts full when looping).
 - **Seamless loop.** The last photo dissolves back into the first, so the file
   loops without a visible jump on a repeating AV player.
 - **License-free export.** MP4 / H.264 (maximum compatibility) or WebM / VP9

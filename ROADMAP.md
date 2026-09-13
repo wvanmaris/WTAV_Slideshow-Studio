@@ -24,10 +24,18 @@ the engine music needs) and are being built first.
 - Choice of 5–10 free, elegant fonts (bundled/offline, license-clear).
 - Typical use: name + dates as an opening (and/or closing) card.
 
-## 4. Multi-photo collage on wide canvases  ✅ built (on main) — nice to have
-- On a wide canvas, show several photos at once in different positions, fading
-  in and out independently for a livelier, richer feel.
-- Settings such as a maximum number of simultaneous photos.
+## 4. Multi-photo collage on wide canvases  ✅ built (v0.2.0), redesigned in v0.4.0
+- Collage mode: 2–7 photos **side by side** in non-overlapping cells (the v0.2
+  version placed them at random and they often covered each other).
+- Replace **one photo at a time** or **all together**; an **Interval** slider
+  and a **Randomness** slider (so swaps don't tick like a clock). Loops stay
+  seamless.
+
+## 6. Photo wall  ✅ built (v0.4.0)
+- Photos are pasted on top of each other at random spots; the wall keeps
+  filling up and new photos cover older ones.
+- Settings: photos kept on the wall, photo size, interval, randomness.
+- With **Loop** on the wall starts full; with Loop off it starts empty.
 
 ## 5. Per-photo border / frame  ✅ built (on main)
 - Optional decorative frame around each photo so they read like real, classic
@@ -41,3 +49,10 @@ the engine music needs) and are being built first.
   MP4/WebM export, save/load, on-device face protection, photo frame.
 - v0.1.1 — background blur as 0–50%, montage shuffle, "keep original" per-photo frame.
 - v0.1.2 — portrait-canvas transport fix, montage shuffle genuinely rearranges.
+- v0.2.0 — background music + fixed total length, title cards, photo borders, collage mode.
+- v0.2.1 — collage black-preview fix.
+- v0.3.0 — tabbed settings, New button, WTAV branding, app icon, About dialog.
+- v0.3.1 — licensing + demo mode. v0.3.2 — start-up update check. v0.3.3 — better face detection (SSD MobileNet).
+- v0.4.0 — **Multi-photo** section replaces "Collage": Collage grid (side by side, no overlap,
+  one-at-a-time / all-together, interval + randomness) and new **Photo wall** mode. Old project
+  files with the v0.2 collage settings load as Collage grid.

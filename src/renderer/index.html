@@ -280,19 +280,53 @@
         </label>
       </section>
 
-      <!-- Collage mode -->
+      <!-- Multi-photo modes: collage grid / photo wall -->
       <section class="settings-group" data-tab="style">
-        <h2>Collage (wide canvas)</h2>
-        <p class="hint">Show several photos at once, fading in and out independently. Best on a wide canvas.</p>
-        <label class="check-field"><input type="checkbox" id="collageEnabled" /><span>Enable collage mode</span></label>
+        <h2>Multi-photo</h2>
+        <p class="hint">Show several photos at once instead of one at a time. Best on a wide canvas.</p>
         <label class="field">
-          <span>Max photos on screen <b id="collageMaxVal">3</b></span>
-          <input type="range" id="collageMax" min="2" max="6" step="1" value="3" />
+          <span>Mode</span>
+          <select id="collageMode">
+            <option value="off" selected>Off — one photo at a time</option>
+            <option value="grid">Collage — photos side by side</option>
+            <option value="wall">Photo wall — photos pile up</option>
+          </select>
         </label>
-        <label class="field">
-          <span>Photo time <b id="collagePhotoSecVal">5</b>s</span>
-          <input type="range" id="collagePhotoSec" min="3" max="12" step="0.5" value="5" />
-        </label>
+        <div id="collageGridFields" class="hidden">
+          <label class="field">
+            <span>Photos on screen <b id="collageCountVal">3</b></span>
+            <input type="range" id="collageCount" min="2" max="7" step="1" value="3" />
+          </label>
+          <label class="field">
+            <span>Replace</span>
+            <select id="collageSwap">
+              <option value="one" selected>One photo at a time</option>
+              <option value="all">All photos together</option>
+            </select>
+          </label>
+        </div>
+        <div id="collageWallFields" class="hidden">
+          <label class="field">
+            <span>Photos kept on the wall <b id="wallDepthVal">20</b></span>
+            <input type="range" id="wallDepth" min="4" max="60" step="1" value="20" />
+          </label>
+          <label class="field">
+            <span>Photo size <b id="wallSizeVal">30</b>% of height</span>
+            <input type="range" id="wallSize" min="10" max="70" step="1" value="30" />
+          </label>
+          <p class="hint">New photos are pasted on top of older ones. With <b>Loop</b> on the wall starts full; with Loop off it starts empty and fills up.</p>
+        </div>
+        <div id="collageCommonFields" class="hidden">
+          <label class="field">
+            <span>Interval <b id="collageIntervalVal">5</b>s</span>
+            <input type="range" id="collageInterval" min="1" max="30" step="0.5" value="5" />
+          </label>
+          <label class="field">
+            <span>Randomness <b id="collageRandomVal">0</b>%</span>
+            <input type="range" id="collageRandom" min="0" max="100" step="5" value="0" />
+          </label>
+          <p class="hint">Interval is the time between replacements. Randomness spreads them out so it doesn't tick like a clock. The loop stays seamless either way.</p>
+        </div>
       </section>
 
       <!-- Face protection (AI) -->

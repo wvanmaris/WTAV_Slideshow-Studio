@@ -1,6 +1,6 @@
 // app.js — UI state and wiring. Holds the project model, prepares assets,
 // drives the preview Player, and runs exports.
-import { buildTimeline, featuredAt, getSourceRect, computeFrame, renderTitleCard, photoInnerRect } from './render.js';
+import { buildTimeline, featuredAt, getSourceRect, computeFrame, renderTitleCard, photoInnerRect, normalizeCollage } from './render.js';
 import { loadImage, makeSlideBackground, makeMontage } from './assets.js';
 import { Player } from './preview.js';
 import { exportVideo } from './exporter.js';
@@ -20,7 +20,7 @@ const project = {
   showFaceOverlay: false, // draw face boxes on the preview
   foreground: { shape: '16:9', scale: 1, align: 'center' }, // the photo frame
   photoBorder: { style: 'none', widthPct: 3 }, // decorative frame around each photo
-  collage: { enabled: false, maxConcurrent: 3, photoSec: 5 }, // multi-photo ambient mode
+  collage: normalizeCollage(null), // multi-photo: 'off' | 'grid' (collage) | 'wall' (photo wall)
   background: { mode: 'slide-blur', blur: 22, dim: 0.5, color: '#101014' }, // blur is 0–50%
   montageSeed: 12345, // shuffle re-rolls this
   timing: { mode: 'per-photo', totalSec: 60, _autoDur: 7 }, // 'total' fits a fixed length / music
@@ -527,10 +527,20 @@ $('btnRedetect').addEventListener('click', async () => {
 });
 $('btnRemoveSlide').addEventListener('click', () => { if (selectedId) removeSlide(selectedId); });
 
-// Collage mode
-$('collageEnabled').addEventListener('change', (e) => { project.collage.enabled = e.target.checked; rebuild(); });
-$('collageMax').addEventListener('input', (e) => { project.collage.maxConcurrent = parseInt(e.target.value, 10); $('collageMaxVal').textContent = e.target.value; rebuild(); });
-$('collagePhotoSec').addEventListener('input', (e) => { project.collage.photoSec = parseFloat(e.target.value); $('collagePhotoSecVal').textContent = e.target.value; rebuild(); });
+// Multi-photo modes (collage grid / photo wall)
+function updateCollageUI() {
+  const m = project.collage.mode;
+  $('collageGridFields').classList.toggle('hidden', m !== 'grid');
+  $('collageWallFields').classList.toggle('hidden', m !== 'wall');
+  $('collageCommonFields').classList.toggle('hidden', m === 'off');
+}
+$('collageMode').addEventListener('change', (e) => { project.collage.mode = e.target.value; updateCollageUI(); rebuild(); });
+$('collageCount').addEventListener('input', (e) => { project.collage.count = parseInt(e.target.value, 10); $('collageCountVal').textContent = e.target.value; rebuild(); });
+$('collageSwap').addEventListener('change', (e) => { project.collage.swap = e.target.value; rebuild(); });
+$('wallDepth').addEventListener('input', (e) => { project.collage.wallDepth = parseInt(e.target.value, 10); $('wallDepthVal').textContent = e.target.value; rebuild(); });
+$('wallSize').addEventListener('input', (e) => { project.collage.wallSizePct = parseInt(e.target.value, 10); $('wallSizeVal').textContent = e.target.value; rebuild(); });
+$('collageInterval').addEventListener('input', (e) => { project.collage.intervalSec = parseFloat(e.target.value); $('collageIntervalVal').textContent = e.target.value; rebuild(); });
+$('collageRandom').addEventListener('input', (e) => { project.collage.randomness = parseInt(e.target.value, 10); $('collageRandomVal').textContent = e.target.value; rebuild(); });
 
 // Global AI toggles
 $('protectFaces').addEventListener('change', (e) => { project.protectFaces = e.target.checked; rebuild(); });
@@ -919,7 +929,7 @@ function serializeProject() {
       protectFaces: project.protectFaces, showFaceOverlay: project.showFaceOverlay,
       foreground: { shape: project.foreground.shape, scale: project.foreground.scale, align: project.foreground.align },
       photoBorder: { style: project.photoBorder.style, widthPct: project.photoBorder.widthPct },
-      collage: { enabled: project.collage.enabled, maxConcurrent: project.collage.maxConcurrent, photoSec: project.collage.photoSec },
+      collage: { ...normalizeCollage(project.collage) },
       background: { mode: project.background.mode, blur: project.background.blur, dim: project.background.dim, color: project.background.color },
       montageSeed: project.montageSeed,
       timing: { mode: project.timing.mode, totalSec: project.timing.totalSec },
@@ -1019,7 +1029,7 @@ async function loadProjectDoc(read, filePath) {
   project.showFaceOverlay = !!p.showFaceOverlay;
   if (p.foreground) project.foreground = { shape: '16:9', scale: 1, align: 'center', ...p.foreground };
   if (p.photoBorder) project.photoBorder = { style: p.photoBorder.style || 'none', widthPct: p.photoBorder.widthPct ?? 3 };
-  if (p.collage) project.collage = { enabled: !!p.collage.enabled, maxConcurrent: p.collage.maxConcurrent ?? 3, photoSec: p.collage.photoSec ?? 5 };
+  project.collage = normalizeCollage(p.collage); // also maps legacy {enabled,maxConcurrent,photoSec}
   if (p.background) Object.assign(project.background, p.background);
   if (typeof p.montageSeed === 'number') project.montageSeed = p.montageSeed;
   if (p.timing) project.timing = { mode: p.timing.mode || 'per-photo', totalSec: p.timing.totalSec || 60, _autoDur: 7 };
@@ -1109,9 +1119,14 @@ function syncControlsFromProject() {
   $('borderStyle').value = project.photoBorder.style;
   $('borderWidthField').classList.toggle('hidden', project.photoBorder.style === 'none');
   $('borderWidth').value = project.photoBorder.widthPct; $('borderWidthVal').textContent = project.photoBorder.widthPct;
-  $('collageEnabled').checked = project.collage.enabled;
-  $('collageMax').value = project.collage.maxConcurrent; $('collageMaxVal').textContent = project.collage.maxConcurrent;
-  $('collagePhotoSec').value = project.collage.photoSec; $('collagePhotoSecVal').textContent = project.collage.photoSec;
+  $('collageMode').value = project.collage.mode;
+  $('collageCount').value = project.collage.count; $('collageCountVal').textContent = project.collage.count;
+  $('collageSwap').value = project.collage.swap;
+  $('wallDepth').value = project.collage.wallDepth; $('wallDepthVal').textContent = project.collage.wallDepth;
+  $('wallSize').value = project.collage.wallSizePct; $('wallSizeVal').textContent = project.collage.wallSizePct;
+  $('collageInterval').value = project.collage.intervalSec; $('collageIntervalVal').textContent = project.collage.intervalSec;
+  $('collageRandom').value = project.collage.randomness; $('collageRandomVal').textContent = project.collage.randomness;
+  updateCollageUI();
   $('defDuration').value = project.defaults.durationSec; $('durVal').textContent = project.defaults.durationSec.toFixed(1);
   $('defTransition').value = project.defaults.transitionSec; $('transVal').textContent = project.defaults.transitionSec.toFixed(1);
   const zoomPct = Math.round((project.defaults.kenBurns.zoom || 0) * 100);

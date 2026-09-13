@@ -37,10 +37,8 @@ const PAN_K = 0.72; // how far across the available slack a directional pan trav
 export function buildTimeline(project) {
   // Collage is a distinct ambient mode (multiple photos at once); it loops over
   // one period and ignores the crossfade timeline / titles.
-  if (project.collage && project.collage.enabled && project.slides.length) {
-    const ci = collageInfo(project);
-    return { items: [], collage: true, cycle: ci.L, totalDuration: ci.L, loop: true };
-  }
+  const sch = buildCollageSchedule(project);
+  if (sch) return { items: [], collage: sch, cycle: sch.L, totalDuration: sch.L, loop: project.loop !== false };
 
   const d = project.defaults;
   const protectGlobal = project.protectFaces !== false;
@@ -415,72 +413,275 @@ function drawSlideLayer(layerCtx, project, item, asset, localU, cw, ch) {
 }
 
 // ---------------------------------------------------------------------------
-// Collage mode — several photos on screen at once, each fading in/out at a
-// seeded position. Deterministic and loopable over period L = nPhotos*appDur.
+// Multi-photo modes — several photos on the canvas at once.
+//
+//   'grid' — Collage: N non-overlapping cells; each cell shows one photo and
+//            swaps to the next one ("one at a time" or "all together").
+//   'wall' — Photo wall: photos are pasted at random spots on top of each
+//            other; the wall keeps filling up and new photos cover old ones.
+//
+// Both are driven by a deterministic schedule (buildCollageSchedule) that is
+// periodic over L seconds, so a looped export closes seamlessly. Randomness
+// only jitters WHEN swaps happen (never the cycle length), so the loop is
+// still exact. The schedule is built once per rebuild() and carried in the
+// timeline object; rendering just looks up "what is on screen at t".
 // ---------------------------------------------------------------------------
-function collageInfo(project) {
-  const c = project.collage || {};
-  const nPhotos = project.slides.length;
-  const N = Math.max(1, Math.min(c.maxConcurrent ?? 3, nPhotos || 1));
-  const appDur = Math.max(2, c.photoSec ?? 5);
-  const fadeDur = Math.min(1.4, appDur * 0.35);
-  const L = (nPhotos || 1) * appDur;
-  return { nPhotos, N, appDur, fadeDur, L };
+const COLLAGE_DEFAULTS = {
+  mode: 'off', count: 3, swap: 'one', intervalSec: 5, randomness: 0,
+  wallDepth: 20, wallSizePct: 30,
+};
+
+export function normalizeCollage(c) {
+  const src = c || {};
+  // Legacy (<= v0.3.x): {enabled, maxConcurrent, photoSec}
+  if (src.mode === undefined && src.enabled !== undefined) {
+    return {
+      ...COLLAGE_DEFAULTS,
+      mode: src.enabled ? 'grid' : 'off',
+      count: clamp(src.maxConcurrent ?? 3, 2, 7),
+      intervalSec: src.photoSec ?? 5,
+    };
+  }
+  const out = { ...COLLAGE_DEFAULTS, ...src };
+  if (!['off', 'grid', 'wall'].includes(out.mode)) out.mode = 'off';
+  out.count = clamp(Math.round(out.count) || 3, 2, 7);
+  out.swap = out.swap === 'all' ? 'all' : 'one';
+  out.intervalSec = clamp(+out.intervalSec || 5, 1, 30);
+  out.randomness = clamp(+out.randomness || 0, 0, 100);
+  out.wallDepth = clamp(Math.round(out.wallDepth) || 20, 4, 60);
+  out.wallSizePct = clamp(Math.round(out.wallSizePct) || 30, 10, 70);
+  return out;
 }
 
-function drawCollage(ctx, project, assets, tSec) {
+// Seeded Fisher-Yates over 0..n-1.
+function seededOrder(n, rnd) {
+  const a = Array.from({ length: n }, (_, i) => i);
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+// Split N cells over rows so every row is (nearly) full and cells are as close
+// to a pleasant landscape aspect as possible. Returns [{x,y,w,h}] in px.
+function gridCells(N, cw, ch) {
+  let best = null;
+  for (let rows = 1; rows <= N; rows++) {
+    const cols = Math.ceil(N / rows);
+    if (cols * (rows - 1) >= N) continue; // last row would be empty
+    const aspect = (cw / cols) / (ch / rows);
+    const score = Math.abs(Math.log(aspect / 1.25));
+    if (!best || score < best.score) best = { rows, cols, score };
+  }
+  const { rows } = best;
+  // Distribute N over rows as evenly as possible, fuller rows first.
+  const per = []; let left = N;
+  for (let r = 0; r < rows; r++) { const n = Math.ceil(left / (rows - r)); per.push(n); left -= n; }
+  const cells = [];
+  const rh = ch / rows;
+  const cwid = cw / Math.max(...per);
+  per.forEach((n, r) => {
+    const x0 = (cw - n * cwid) / 2; // centre short rows
+    for (let i = 0; i < n; i++) cells.push({ x: x0 + i * cwid, y: r * rh, w: cwid, h: rh });
+  });
+  return cells;
+}
+
+export function buildCollageSchedule(project) {
+  const c = normalizeCollage(project.collage);
+  const nPhotos = project.slides.length;
+  if (c.mode === 'off' || !nPhotos) return null;
+  const cw = project.canvas.w, ch = project.canvas.h;
+  const seedBase = 'mp' + (project.montageSeed ?? 0) + ':';
+  const order = seededOrder(nPhotos, seededRandom(seedBase + 'seq'));
+  const interval = c.intervalSec;
+  const jit = (c.randomness / 100) * 0.45 * interval; // < interval/2 keeps events strictly ordered
+  const jitter = (r) => (r() - 0.5) * 2 * jit;
+
+  if (c.mode === 'grid') {
+    const N = Math.min(c.count, nPhotos);
+    const slots = Array.from({ length: N }, () => []); // per slot: [{t, photo, key}]
+    let L;
+    if (c.swap === 'all') {
+      // Rounds of N photos; the last round is padded by repeating photos from
+      // the start of the order (a photo only lives one round, so a repeat can
+      // never be on screen twice at once).
+      const R = Math.ceil(nPhotos / N);
+      L = R * interval;
+      for (let r = 0; r < R; r++) {
+        const t = r * interval + jitter(seededRandom(seedBase + 'ga' + r));
+        for (let k = 0; k < N; k++) { const j = r * N + k; slots[k].push({ t, photo: order[j % nPhotos], key: j }); }
+      }
+    } else {
+      // One swap per interval, every photo exactly once per cycle (so a photo
+      // is never on screen twice). Slots are visited round-robin in a seeded
+      // order, so each photo lives N intervals; the loop closes because a
+      // slot's state before its first swap is its last swap of the cycle.
+      L = nPhotos * interval;
+      const visit = seededOrder(N, seededRandom(seedBase + 'so'));
+      for (let j = 0; j < nPhotos; j++) {
+        const t = j * interval + jitter(seededRandom(seedBase + 'g1' + j));
+        slots[visit[j % N]].push({ t, photo: order[j], key: j });
+      }
+    }
+    for (const s of slots) s.sort((a, b) => a.t - b.t);
+    const fadeDur = Math.min(1.2, interval * 0.35);
+    return { mode: 'grid', L, N, fadeDur, slots, cells: gridCells(N, cw, ch) };
+  }
+
+  // 'wall'
+  const L = nPhotos * interval;
+  const pastes = [];
+  for (let j = 0; j < nPhotos; j++) {
+    const r = seededRandom(seedBase + 'w' + j);
+    const t = j * interval + jitter(r);
+    pastes.push({ t, photo: order[j], key: j, rx: r(), ry: r(), rot: (r() - 0.5) * 0.28, sz: 0.85 + r() * 0.3 });
+  }
+  pastes.sort((a, b) => a.t - b.t);
+  return { mode: 'wall', L, pastes, depth: c.wallDepth, sizePct: c.wallSizePct, fadeDur: Math.min(0.6, interval * 0.3) };
+}
+
+// Draw one framed photo (shadow, optional decorative border, cover-cropped
+// image) centred at (cx,cy) with size w x h and rotation rot, at alpha.
+function drawPastedPhoto(ctx, project, img, cx, cy, w, h, rot, alpha) {
+  const border = project.photoBorder || { style: 'none' };
+  const hasB = border.style && border.style !== 'none';
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(cx, cy);
+  ctx.rotate(rot);
+  const F = { x: -w / 2, y: -h / 2, w, h };
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = h * 0.06; ctx.shadowOffsetY = h * 0.02;
+  ctx.fillStyle = '#000'; ctx.fillRect(F.x, F.y, F.w, F.h);
+  ctx.restore();
+  const inner = hasB ? photoInnerRect(project, F) : { x: F.x, y: F.y, w: F.w, h: F.h, bpx: 0 };
+  if (hasB) drawFrameFill(ctx, border.style, F, inner.bpx);
+  const scale = Math.max(inner.w / img.width, inner.h / img.height);
+  const dw = img.width * scale, dh = img.height * scale;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(inner.x, inner.y, inner.w, inner.h); ctx.clip();
+  ctx.drawImage(img, inner.x + (inner.w - dw) / 2, inner.y + (inner.h - dh) / 2, dw, dh);
+  ctx.restore();
+  ctx.restore();
+}
+
+// Photo rect inside a grid cell: keeps the photo's own aspect (clamped), takes
+// 84-98 % of the cell, sits at a seeded spot inside the cell, slight tilt.
+function cellPhotoRect(cell, img, rnd) {
+  const gap = Math.min(cell.w, cell.h) * 0.07;
+  const iw = cell.w - 2 * gap, ih = cell.h - 2 * gap;
+  const ar = clamp(img.width / img.height, 0.65, 1.8);
+  let w = iw, h = w / ar;
+  if (h > ih) { h = ih; w = h * ar; }
+  const s = 0.84 + rnd() * 0.14;
+  w *= s; h *= s;
+  const cx = cell.x + gap + w / 2 + rnd() * (iw - w);
+  const cy = cell.y + gap + h / 2 + rnd() * (ih - h);
+  const rot = (rnd() - 0.5) * 0.10;
+  return { cx, cy, w, h, rot };
+}
+
+function drawCollageBackground(ctx, project) {
   const cw = project.canvas.w, ch = project.canvas.h;
   const bg = project.background || {};
   if (bg.mode === 'montage' && project._montage) ctx.drawImage(project._montage, 0, 0, cw, ch);
   else { ctx.fillStyle = bg.color || '#0b0b0e'; ctx.fillRect(0, 0, cw, ch); }
+}
 
-  const { nPhotos, N, appDur, fadeDur, L } = collageInfo(project);
-  if (!nPhotos || L <= 0) return;
+function drawGrid(ctx, project, assets, sch, tSec) {
+  const { L, fadeDur, slots, cells } = sch;
   const t = ((tSec % L) + L) % L;
-  const stagger = appDur / N;
-  const border = project.photoBorder || { style: 'none' };
-  const hasB = border.style && border.style !== 'none';
+  slots.forEach((events, k) => {
+    if (!events.length) return;
+    // Current = last event with t <= now (wrapping to the last event of the
+    // previous cycle); previous = the one before it.
+    let ci = -1;
+    for (let i = 0; i < events.length; i++) if (events[i].t <= t) ci = i;
+    const wrapped = ci < 0;
+    const curIdx = wrapped ? events.length - 1 : ci;
+    const cur = events[curIdx];
+    const prev = events[(curIdx - 1 + events.length) % events.length];
+    const since = wrapped ? t + (L - cur.t) : t - cur.t;
+    const a = fadeDur > 0 ? clamp(since / fadeDur, 0, 1) : 1;
+    const cell = cells[k];
+    const draw = (ev, alpha) => {
+      const asset = assets[ev.photo];
+      if (!asset || !asset.img || alpha <= 0.005) return;
+      const r = cellPhotoRect(cell, asset.img, seededRandom('cell' + k + '-' + ev.key));
+      drawPastedPhoto(ctx, project, asset.img, r.cx, r.cy, r.w, r.h, r.rot, alpha);
+    };
+    if (a < 1 && prev !== cur) draw(prev, 1 - a);
+    draw(cur, a);
+  });
+}
 
-  for (let k = 0; k < N; k++) {
-    const localT = t + k * stagger;
-    const appIndex = Math.floor(localT / appDur);
-    const phase = localT - appIndex * appDur;
-    const alpha = Math.min(clamp(phase / fadeDur, 0, 1), clamp((appDur - phase) / fadeDur, 0, 1));
-    if (alpha <= 0.01) continue;
-    const photoIdx = (((appIndex * N + k) % nPhotos) + nPhotos) % nPhotos;
-    const asset = assets[photoIdx];
-    if (!asset || !asset.img) continue;
-
-    // Placement is periodic with nPhotos so the whole collage loops seamlessly.
-    const rnd = seededRandom('col' + k + '-' + ((appIndex % nPhotos + nPhotos) % nPhotos));
-    let th = ch * (0.34 + rnd() * 0.28);
-    let tw = th * (1.05 + rnd() * 0.55);
-    tw = Math.min(tw, cw * 0.9); th = Math.min(th, ch * 0.9);
-    const tx = rnd() * Math.max(0, cw - tw);
-    const ty = rnd() * Math.max(0, ch - th);
-    const rot = (rnd() - 0.5) * 0.18;
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.translate(tx + tw / 2, ty + th / 2);
-    ctx.rotate(rot);
-    const F = { x: -tw / 2, y: -th / 2, w: tw, h: th };
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = th * 0.05; ctx.shadowOffsetY = th * 0.02;
-    ctx.fillStyle = '#000'; ctx.fillRect(F.x, F.y, F.w, F.h);
-    ctx.restore();
-    const inner = hasB ? photoInnerRect(project, F) : { x: F.x, y: F.y, w: F.w, h: F.h, bpx: 0 };
-    if (hasB) drawFrameFill(ctx, border.style, F, inner.bpx);
-    const img = asset.img;
-    const scale = Math.max(inner.w / img.width, inner.h / img.height);
-    const dw = img.width * scale, dh = img.height * scale;
-    ctx.save();
-    ctx.beginPath(); ctx.rect(inner.x, inner.y, inner.w, inner.h); ctx.clip();
-    ctx.drawImage(img, inner.x + (inner.w - dw) / 2, inner.y + (inner.h - dh) / 2, dw, dh);
-    ctx.restore();
-    ctx.restore();
+function drawWall(ctx, project, assets, sch, tSec, loop) {
+  const cw = project.canvas.w, ch = project.canvas.h;
+  const { L, pastes, depth, sizePct, fadeDur } = sch;
+  const n = pastes.length;
+  const t = loop ? ((tSec % L) + L) % L : clamp(tSec, 0, L);
+  // Index of the newest paste with t <= now.
+  let newest = -1;
+  for (let i = 0; i < n; i++) if (pastes[i].t <= t) newest = i;
+  if (newest < 0 && !loop) return; // wall starts empty in one-shot mode
+  // Layers, oldest -> newest. In a loop the wall is already full: pastes from
+  // the previous cycle sit underneath. One extra layer is kept so the oldest
+  // can fade out instead of popping off.
+  const layers = [];
+  const keep = Math.min(depth + 1, n);
+  for (let m = keep - 1; m >= 0; m--) {
+    let i = newest - m;
+    let age;
+    if (i < 0) { if (!loop) continue; i += n; age = t + (L - pastes[i].t); }
+    else age = t - pastes[i].t;
+    layers.push({ p: pastes[i], age, rank: m });
   }
+  const baseH = ch * (sizePct / 100);
+  const newestAge = newest >= 0 ? t - pastes[newest].t : t + (L - pastes[n - 1].t);
+  for (const { p, age, rank } of layers) {
+    const asset = assets[p.photo];
+    if (!asset || !asset.img) continue;
+    const img = asset.img;
+    // New paste: quick fade-in plus a small "slap-on" settle.
+    const u = clamp(age / Math.max(0.01, fadeDur), 0, 1);
+    const settle = 1 + (1 - u) * 0.07;
+    let alpha = u;
+    // The layer that just dropped below the kept depth fades out while the
+    // newest one fades in, so it never pops.
+    if (rank === depth) alpha = Math.min(alpha, 1 - clamp(newestAge / Math.max(0.01, fadeDur), 0, 1));
+    const ar = clamp(img.width / img.height, 0.6, 1.8);
+    const h = baseH * p.sz * settle, w = h * ar;
+    // Keep the whole photo inside the canvas (small safe margin), so nothing
+    // is cut off at the edges; oversize photos just sit centred.
+    const pad = Math.min(cw, ch) * 0.025;
+    const cx = w >= cw - 2 * pad ? cw / 2 : pad + w / 2 + p.rx * (cw - w - 2 * pad);
+    const cy = h >= ch - 2 * pad ? ch / 2 : pad + h / 2 + p.ry * (ch - h - 2 * pad);
+    drawPastedPhoto(ctx, project, img, cx, cy, w, h, p.rot, alpha);
+  }
+}
+
+function drawCollage(ctx, project, timeline, assets, tSec) {
+  const sch = timeline.collage;
+  drawCollageBackground(ctx, project);
+  if (!sch) return;
+  if (sch.mode === 'grid') drawGrid(ctx, project, assets, sch, tSec);
+  else if (sch.mode === 'wall') drawWall(ctx, project, assets, sch, tSec, !!timeline.loop);
   ctx.globalAlpha = 1;
+}
+
+// Fade in from / out to black (one-shot only; a loop must not flash black).
+function applyEndFades(ctx, project, timeline, tSec) {
+  if (timeline.loop || !project.fade) return;
+  const cw = project.canvas.w, ch = project.canvas.h;
+  const total = timeline.totalDuration;
+  const fin = project.fade.inSec || 0;
+  const fout = project.fade.endMode === 'fadeout' ? (project.fade.outSec || 0) : 0;
+  let env = 1;
+  if (fin > 0) env = Math.min(env, clamp(tSec / fin, 0, 1));
+  if (fout > 0) env = Math.min(env, clamp((total - tSec) / fout, 0, 1));
+  if (env < 1) {
+    ctx.fillStyle = `rgba(0,0,0,${(1 - env).toFixed(4)})`;
+    ctx.fillRect(0, 0, cw, ch);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -494,7 +695,7 @@ export function renderFrame(ctx, project, timeline, assets, tSec, scratch) {
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, cw, ch);
 
-  if (timeline.collage) { drawCollage(ctx, project, assets, tSec); return; }
+  if (timeline.collage) { drawCollage(ctx, project, timeline, assets, tSec); applyEndFades(ctx, project, timeline, tSec); return; }
   if (!items.length) return;
 
   // Loop: wrap time into the cycle. One-shot: clamp to the real duration
@@ -534,19 +735,7 @@ export function renderFrame(ctx, project, timeline, assets, tSec, scratch) {
   }
   ctx.globalAlpha = 1;
 
-  // Fade in from / out to black (one-shot only — a loop shouldn't flash black).
-  if (!timeline.loop && project.fade) {
-    const total = timeline.totalDuration;
-    const fin = project.fade.inSec || 0;
-    const fout = project.fade.endMode === 'fadeout' ? (project.fade.outSec || 0) : 0;
-    let env = 1;
-    if (fin > 0) env = Math.min(env, clamp(tSec / fin, 0, 1));
-    if (fout > 0) env = Math.min(env, clamp((total - tSec) / fout, 0, 1));
-    if (env < 1) {
-      ctx.fillStyle = `rgba(0,0,0,${(1 - env).toFixed(4)})`;
-      ctx.fillRect(0, 0, cw, ch);
-    }
-  }
+  applyEndFades(ctx, project, timeline, tSec);
 }
 
 // Which slide is featured (most opaque) at time t — for the preview overlay.
